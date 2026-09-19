@@ -217,7 +217,7 @@ const LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY = {
     "يوسفمصباحوليمحنا": 94
 };
 
-const ROSTER_PHONE_BY_KEY = new Map([
+const ROSTER_PHONE_BY_KEY = new Map<string, string>(
     ["فيلوباتير عادل", "01202821716"],
     ["جرجس صابر", "01222608959"],
     ["فيلوباتير ماهر", "01064383757"],
