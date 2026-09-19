@@ -1275,22 +1275,19 @@ const App = () => {
             isInitialMount.current = false;
             return;
         }
-        if (true) {
-            const currentStr = JSON.stringify(students);
+        const currentStr = JSON.stringify(students);
             if (currentStr !== lastStudentsDB.current) {
                 localStorage.setItem('church_attendance_students_v8', currentStr);
                 setDoc(doc(db, 'appData', 'students_v8'), { items: students }, { merge: true })
                     .catch(err => console.error("Error saving students to Firestore:", err));
                 lastStudentsDB.current = currentStr;
             }
-        }
-        if (true) {
-            const currentStr = JSON.stringify(admins);
-            if (currentStr !== lastAdminsDB.current) {
-                localStorage.setItem('church_attendance_admins_v8', currentStr);
+        const currentAdminsStr = JSON.stringify(admins);
+            if (currentAdminsStr !== lastAdminsDB.current) {
+                localStorage.setItem('church_attendance_admins_v8', currentAdminsStr);
                 setDoc(doc(db, 'appData', 'admins_v8'), { items: admins }, { merge: true })
                     .catch(err => console.error("Error saving admins to Firestore:", err));
-                lastAdminsDB.current = currentStr;
+                lastAdminsDB.current = currentAdminsStr;
             }
         }
     }, [students, admins]);
