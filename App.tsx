@@ -646,15 +646,16 @@ const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = 
             h.date.startsWith(currentMonthStr) && h.type === 'confession'
         );
         const canAddConfession = !hasReceivedConfessionThisMonth;
+        const regularMeetingTimeAllowed = meetingTimeAllowed && (!isHistoricalEdit ? currentWindow?.kind !== 'monthlyMass' : true);
 
         return {
             canAddMass: targetIsFirstFriday && !hasReceivedMassThisMonth && meetingTimeAllowed,
             canAddEarly: targetIsFriday && !targetIsFirstFriday && !hasReceivedAttendanceToday && meetingTimeAllowed && (!isHistoricalEdit ? currentWindow?.kind === 'early' : true),
             canAddLate: targetIsFriday && !targetIsFirstFriday && !hasReceivedAttendanceToday && meetingTimeAllowed && (!isHistoricalEdit ? currentWindow?.kind === 'late' : true),
             canAddConfession: canAddConfession,
-            canAddGamesStation: meetingTimeAllowed && !hasReceivedGamesStationToday,
-            canAddRoots: meetingTimeAllowed && !hasReceivedRootsToday,
-            canAddParticipation: meetingTimeAllowed,
+            canAddGamesStation: regularMeetingTimeAllowed && !hasReceivedGamesStationToday,
+            canAddRoots: regularMeetingTimeAllowed && !hasReceivedRootsToday,
+            canAddParticipation: regularMeetingTimeAllowed,
             windowMessage: isHistoricalEdit ? null : (currentWindow?.message || null),
             meetingTimeLabel: getMeetingTimeMessage(),
         };
