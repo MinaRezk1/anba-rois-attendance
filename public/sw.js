@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sec-boys-v4';
+const CACHE_NAME = 'sec-boys-v5-2026-09-19';
 const BASE_URL = new URL('./', self.registration.scope).toString();
 const ASSETS = [
   BASE_URL,
@@ -55,7 +55,7 @@ self.addEventListener('fetch', (event) => {
   // deployments are visible without waiting for a cache expiration.
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetch(new Request(request, { cache: 'no-store' }))
         .then((networkResponse) => {
           const copy = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
