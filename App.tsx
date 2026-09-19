@@ -618,7 +618,7 @@ const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = 
         const history = student.attendanceHistory || [];
         // Super admin can edit historical dates; normal users always operate on current Cairo date/time.
         const todayCairoDate = getCairoDateKey();
-        const isHistoricalEdit = isSuperAdmin && Boolean(selectedDate) && selectedDate !== todayCairoDate && !fromScan;
+        const isHistoricalEdit = isSuperAdmin && Boolean(selectedDate) && selectedDate < todayCairoDate && !fromScan;
         const targetDate = selectedDate || getCairoDateKey();
         const currentMonthStr = targetDate.substring(0, 7);
         const targetIsFriday = isFridayDateKey(targetDate);
@@ -1275,7 +1275,7 @@ const App = () => {
             isInitialMount.current = false;
             return;
         }
-        if (students.length > 0) {
+        if (true) {
             const currentStr = JSON.stringify(students);
             if (currentStr !== lastStudentsDB.current) {
                 localStorage.setItem('church_attendance_students_v8', currentStr);
@@ -1284,7 +1284,7 @@ const App = () => {
                 lastStudentsDB.current = currentStr;
             }
         }
-        if (admins.length > 0) {
+        if (true) {
             const currentStr = JSON.stringify(admins);
             if (currentStr !== lastAdminsDB.current) {
                 localStorage.setItem('church_attendance_admins_v8', currentStr);
@@ -1876,6 +1876,8 @@ const App = () => {
             }
         };
         reader.readAsText(file);
+        // Reset the input so selecting the same backup file again triggers onChange.
+        e.currentTarget.value = '';
     };
 
 
