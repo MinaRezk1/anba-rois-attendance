@@ -302,7 +302,7 @@ const ROSTER_PHONE_BY_KEY = new Map([
     ["مينا هاني سمير", "0115019418"],
     ["يوسف مايكل عجيب", "01221788540"],
     ["يوسف روماني", "01285046844"]
-].map(([name, phone]) => [normalizeRosterStudentName(name), phone]));
+].map(([name, phone]) => [normalizeRosterStudentName(name), phone] as [string, string]));
 
 const buildExactCurrentRoster = (existingItems) => {
     const existing = Array.isArray(existingItems) ? existingItems : [];
