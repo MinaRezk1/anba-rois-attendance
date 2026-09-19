@@ -245,9 +245,9 @@ const THIRD_SECONDARY_ROSTER_NAMES = [
 ];
 
 const ROSTER_GRADE_BY_KEY = new Map<string, string>([
-    ...FIRST_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'أولى ثانوي']),
-    ...SECOND_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'تانية ثانوي']),
-    ...THIRD_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'تالتة ثانوي']),
+    ...FIRST_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'أولى ثانوي'] as [string, string]),
+    ...SECOND_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'تانية ثانوي'] as [string, string]),
+    ...THIRD_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'تالتة ثانوي'] as [string, string]),
 ]);
 
 const getRosterGrade = (name) => ROSTER_GRADE_BY_KEY.get(normalizeRosterStudentName(name)) || '';
