@@ -1980,7 +1980,8 @@ const App = () => {
             id: student.id, 
             phone: student.phone || '', 
             name: student.name,
-            grade: student.grade || ''
+            grade: student.grade || '',
+            previousYearsPoints: Number(student.previousYearsPoints || 0)
         });
     };
 
@@ -1990,7 +1991,12 @@ const App = () => {
         const newName = editingStudent.name.trim();
         const newPhone = editingStudent.phone.trim();
         const newGrade = String(editingStudent.grade || '').trim();
-        
+        const currentStudent = students.find(s => s.id === studentId);
+        const requestedPreviousYearsPoints = Number(editingStudent.previousYearsPoints);
+        const newPreviousYearsPoints = isMinaAdmin
+            ? (Number.isFinite(requestedPreviousYearsPoints) && requestedPreviousYearsPoints >= 0 ? Math.floor(requestedPreviousYearsPoints) : null)
+            : Number(currentStudent?.previousYearsPoints || 0);
+
         if (!newName) {
             showToast("لا يمكن ترك الاسم فارغاً");
             return;
@@ -2004,9 +2010,20 @@ const App = () => {
             return;
         }
 
+        if (isMinaAdmin && newPreviousYearsPoints === null) {
+            showToast('يرجى إدخال عدد صحيح موجب أو صفر لنقاط السنين السابقة.');
+            return;
+        }
+
         setStudents(prev => prev.map(s => {
             if (s.id === studentId) {
-                return { ...s, name: newName, phone: newPhone, ...(newGrade ? { grade: newGrade } : {}) };
+                return {
+                    ...s,
+                    name: newName,
+                    phone: newPhone,
+                    ...(newGrade ? { grade: newGrade } : {}),
+                    ...(isMinaAdmin ? { previousYearsPoints: newPreviousYearsPoints } : {})
+                };
             }
             return s;
         }));
@@ -3058,6 +3075,19 @@ const App = () => {
                                                                         <option value="تالتة ثانوي">تالتة ثانوي</option>
                                                                      </select>
                                                                 </div>
+                                                                {isMinaAdmin && (
+                                                                    <div className="flex flex-col gap-1">
+                                                                        <label className="text-xs text-amber-300 font-bold">نقاط السنين السابقة (مينا فقط):</label>
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            step="1"
+                                                                            value={editingStudent.previousYearsPoints ?? 0}
+                                                                            onChange={(e) => setEditingStudent({...editingStudent, previousYearsPoints: e.target.value})}
+                                                                            className="bg-indigo-700 text-white border border-amber-500/50 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-500 w-full"
+                                                                        />
+                                                                    </div>
+                                                                )}
                                                                 <div className="flex justify-end gap-2 mt-2">
                                                                     <button onClick={() => handleSaveStudentEdit(student.id)} className="text-green-400 hover:text-green-300 p-1"><CheckIcon className="w-5 h-5"/></button>
                                                                     <button onClick={handleCancelEdit} className="text-red-400 hover:text-red-300 p-1"><XIcon className="w-5 h-5"/></button>
@@ -4698,84 +4728,3 @@ const App = () => {
                 isOpen={!!studentForPointsEdit && isMinaAdmin}
                 onClose={() => setStudentForPointsEdit(null)}
                 title="التحكم بالنواحي والفلوس (خاص بالخادم مينا) ⚖️"
-            >
-                {studentForPointsEdit && (
-                    <div className="space-y-5 text-right font-sans" dir="rtl">
-                        <div className="bg-indigo-950/80 p-4 rounded-xl border border-indigo-800/60 flex items-center justify-between">
-                            <div>
-                                <h3 className="font-black text-amber-400 text-base md:text-lg">{studentForPointsEdit.name}</h3>
-                                <p className="text-xs text-indigo-300 mt-0.5">تعديل رصيد النقاط والفلوس في لوحة الصدارة</p>
-                            </div>
-                            <div className="bg-amber-500/20 text-amber-300 px-3.5 py-2 rounded-xl border border-amber-500/30 text-xs font-black shadow-inner">
-                                الرصيد الحالي: {studentForPointsEdit.pointsForLeaderboard ?? studentForPointsEdit.points ?? 0} نقطة | {getStudentMoney(studentForPointsEdit)} جنيه
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Points Input */}
-                            <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40">
-                                <label className="block text-xs font-bold text-amber-300 mb-2">
-                                    عدد النقاط المطلوب 🎯
-                                </label>
-                                <div className="relative">
-                                    <input
-                                        type="number"
-                                        value={targetPointsInput}
-                                        onChange={(e) => handlePointsInputChange(e.target.value)}
-                                        placeholder="مثال: 100"
-                                        className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right"
-                                    />
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">نقطة</span>
-                                </div>
-                            </div>
-
-                            {/* Money Input */}
-                            <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40">
-                                <label className="block text-xs font-bold text-amber-300 mb-2">
-                                    القيمة بالجنيه 💰 (مستقلة تماماً)
-                                </label>
-                                <div className="relative">
-                                    <input
-                                        type="number"
-                                        value={targetMoneyInput}
-                                        onChange={(e) => handleMoneyInputChange(e.target.value)}
-                                        placeholder="مثال: 50"
-                                        className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right"
-                                    />
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">جنيه</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-xl text-xs text-amber-200/90 leading-relaxed">
-                            💡 <span className="font-bold text-amber-300">تنويه:</span> النقاط والجنيهات منفصلان تماماً. يمكنك إدخال أي عدد نقاط وأي مبلغ بالجنيه بشكل مستقل دون تأثر إحداهما بالأخرى.
-                        </div>
-
-                        <div className="flex gap-3 pt-2">
-                            <button
-                                onClick={handleSavePointsEdit}
-                                className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-indigo-950 font-black py-3 rounded-xl transition-all text-sm shadow-md active:scale-[0.98]"
-                            >
-                                حفظ التغييرات 💾
-                            </button>
-                            <button
-                                onClick={() => setStudentForPointsEdit(null)}
-                                className="px-5 bg-indigo-900 hover:bg-indigo-800 text-indigo-200 font-bold py-3 rounded-xl transition-all text-sm"
-                            >
-                                إلغاء
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </Modal>
-
-</div>
-    );
-};
-
-
-
-
-    
-
-export default App;
