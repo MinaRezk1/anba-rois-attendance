@@ -217,7 +217,7 @@ const LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY = {
     "يوسفمصباحوليمحنا": 94
 };
 
-const ROSTER_PHONE_BY_KEY = new Map<string, string>([
+const ROSTER_PHONE_BY_KEY: Record<string, string> = {
     ["فيلوباتير عادل", "01202821716"],
     ["جرجس صابر", "01222608959"],
     ["فيلوباتير ماهر", "01064383757"],
@@ -329,7 +329,7 @@ const buildExactCurrentRoster = (existingItems) => {
                     name: canonicalName,
                     ...(grade ? { grade } : {}),
                     previousYearsPoints: Number(LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY[normalizeRosterStudentName(canonicalName)] ?? 0) || 0,
-                    phone: ROSTER_PHONE_BY_KEY.get(normalizeRosterStudentName(canonicalName)) ?? existingStudent.phone ?? '',
+                    phone: ROSTER_PHONE_BY_KEY[normalizeRosterStudentName(canonicalName)] ?? existingStudent.phone ?? '',
                     points: 0,
                     lastAttended: null,
                     attendanceHistory: [],
@@ -342,7 +342,7 @@ const buildExactCurrentRoster = (existingItems) => {
                 grade: grade || '',
                 points: 0,
                 previousYearsPoints: Number(LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY[normalizeRosterStudentName(canonicalName)] ?? 0) || 0,
-                phone: ROSTER_PHONE_BY_KEY.get(normalizeRosterStudentName(canonicalName)) ?? '',
+                phone: ROSTER_PHONE_BY_KEY[normalizeRosterStudentName(canonicalName)] ?? '',
                 lastAttended: null,
                 attendanceHistory: [],
             };
