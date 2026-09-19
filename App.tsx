@@ -1111,6 +1111,7 @@ const App = () => {
     
     const [newStudentName, setNewStudentName] = useState('');
     const [newStudentPhone, setNewStudentPhone] = useState('');
+    const [newStudentGrade, setNewStudentGrade] = useState('');
     const [isScannerOpen, setScannerOpen] = useState(false);
     const [scannedStudent, setScannedStudent] = useState(null);
     const [expandedStudentId, setExpandedStudentId] = useState(null);
@@ -1418,6 +1419,10 @@ const App = () => {
             showToast('الرجاء إدخال رقم الموبايل');
             return;
         }
+        if (!newStudentGrade.trim()) {
+            showToast('الرجاء اختيار الصف الدراسي');
+            return;
+        }
         const trimmedName = newStudentName.trim();
         const isDuplicate = students.some(s => s.name.toLowerCase() === trimmedName.toLowerCase());
 
@@ -1430,6 +1435,7 @@ const App = () => {
             id: generateId(),
             name: trimmedName,
             phone: newStudentPhone.trim(),
+            grade: newStudentGrade.trim(),
             points: 0,
             lastAttended: null,
             attendanceHistory: [],
@@ -1438,9 +1444,10 @@ const App = () => {
         saveStudentsData(updatedStudents);
         setNewStudentName('');
         setNewStudentPhone('');
+        setNewStudentGrade('');
         setAddStudentModalOpen(false);
         showToast(`تمت إضافة "${trimmedName}" بنجاح`);
-    }, [newStudentName, newStudentPhone, students, showToast]);
+    }, [newStudentName, newStudentPhone, newStudentGrade, students, showToast]);
     
     const addPoints = useCallback((studentId, type, points, fromScan = false, description = null) => {
         if (!loggedInAdmin) {
@@ -1656,7 +1663,8 @@ const App = () => {
         setEditingStudent({ 
             id: student.id, 
             phone: student.phone || '', 
-            name: student.name 
+            name: student.name,
+            grade: student.grade || ''
         });
     };
 
@@ -1665,6 +1673,7 @@ const App = () => {
         
         const newName = editingStudent.name.trim();
         const newPhone = editingStudent.phone.trim();
+        const newGrade = String(editingStudent.grade || '').trim();
         
         if (!newName) {
             showToast("لا يمكن ترك الاسم فارغاً");
@@ -1681,7 +1690,7 @@ const App = () => {
 
         setStudents(prev => prev.map(s => {
             if (s.id === studentId) {
-                return { ...s, name: newName, phone: newPhone };
+                return { ...s, name: newName, phone: newPhone, ...(newGrade ? { grade: newGrade } : {}) };
             }
             return s;
         }));
@@ -2644,6 +2653,11 @@ const App = () => {
                                                 <div className="text-amber-400 font-bold text-xl w-8 text-center">{student.points || 0}</div>
                                                 <span className="text-lg font-semibold flex items-center gap-2 flex-wrap">
                                                     <span>{student.name}</span>
+                                                    {student.grade && (
+                                                        <span className="inline-flex items-center gap-1 bg-sky-500/15 text-sky-300 border border-sky-400/30 font-black text-[10px] px-2 py-0.5 rounded-full shrink-0 select-none">
+                                                            🎓 {student.grade}
+                                                        </span>
+                                                    )}
                                                     {hasAllMonthly && (
                                                         <span className="inline-flex items-center gap-1 bg-gradient-to-r from-amber-400 to-yellow-500 text-indigo-950 font-black text-[10px] px-2 py-0.5 rounded-full shadow-md animate-pulse shrink-0 select-none">
                                                             ✨ بطل الشهر 👑
@@ -2684,6 +2698,19 @@ const App = () => {
                                                                         onChange={(e) => setEditingStudent({...editingStudent, phone: e.target.value})}
                                                                         className="bg-indigo-700 text-white border border-indigo-600 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-500 w-full"
                                                                      />
+                                                                </div>
+                                                                <div className="flex flex-col gap-1">
+                                                                     <label className="text-xs text-indigo-300">الصف الدراسي:</label>
+                                                                     <select
+                                                                        value={editingStudent.grade || ''}
+                                                                        onChange={(e) => setEditingStudent({...editingStudent, grade: e.target.value})}
+                                                                        className="bg-indigo-700 text-white border border-indigo-600 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-500 w-full"
+                                                                     >
+                                                                        <option value="">بدون تحديد</option>
+                                                                        <option value="أولى ثانوي">أولى ثانوي</option>
+                                                                        <option value="تانية ثانوي">تانية ثانوي</option>
+                                                                        <option value="تالتة ثانوي">تالتة ثانوي</option>
+                                                                     </select>
                                                                 </div>
                                                                 <div className="flex justify-end gap-2 mt-2">
                                                                     <button onClick={() => handleSaveStudentEdit(student.id)} className="text-green-400 hover:text-green-300 p-1"><CheckIcon className="w-5 h-5"/></button>
@@ -3855,9 +3882,23 @@ const App = () => {
                              className="w-full bg-indigo-800 text-white placeholder-indigo-400 border border-indigo-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
                          />
                     </div>
+                    <div>
+                         <label htmlFor="new-student-grade" className="block text-sm font-medium text-indigo-300 mb-2">الصف الدراسي</label>
+                         <select
+                             id="new-student-grade"
+                             value={newStudentGrade}
+                             onChange={(e) => setNewStudentGrade(e.target.value)}
+                             className="w-full bg-indigo-800 text-white border border-indigo-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                         >
+                             <option value="">اختر الصف الدراسي</option>
+                             <option value="أولى ثانوي">أولى ثانوي</option>
+                             <option value="تانية ثانوي">تانية ثانوي</option>
+                             <option value="تالتة ثانوي">تالتة ثانوي</option>
+                         </select>
+                    </div>
                      <button
                          onClick={addStudent}
-                         disabled={!newStudentName.trim() || !newStudentPhone.trim()}
+                         disabled={!newStudentName.trim() || !newStudentPhone.trim() || !newStudentGrade.trim()}
                          className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed !mt-6"
                      >
                          <UserPlusIcon className="w-5 h-5" />
