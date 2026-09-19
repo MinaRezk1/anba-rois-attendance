@@ -520,6 +520,14 @@ const getStudentMoney = (student) => {
 };
 
 
+const formatCairoDateKeyAr = (dateKey, options = {}) => {
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(dateKey || '')) return '';
+    return new Date(dateKey + 'T12:00:00Z').toLocaleDateString('ar-EG', {
+        timeZone: CAIRO_TIMEZONE,
+        ...options,
+    });
+};
+
 const formatDateKey = (date) => {
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
 };
@@ -2743,7 +2751,7 @@ const App = () => {
                                                                             <div className="flex-grow">
                                                                                 <div className="flex justify-between items-center">
                                                                                     <span>
-                                                                                        <span className="text-indigo-400 ml-2 text-xs">({new Date(record.date).toLocaleDateString('ar-EG')})</span>
+                                                                                        <span className="text-indigo-400 ml-2 text-xs">({formatCairoDateKeyAr(record.date)})</span>
                                                                                         {record.typeName}
                                                                                     </span>
                                                                                     <span className={`font-bold ${record.points > 0 ? 'text-green-400' : 'text-red-400'}`}>{record.points > 0 ? `+${record.points}`: record.points}</span>
@@ -3444,7 +3452,7 @@ const App = () => {
                                                 <div className="flex items-center gap-2 mb-1">
                                                     <CalendarIcon className="w-5 h-5 text-amber-400"/>
                                                     <span className="font-bold text-lg text-white">
-                                                        {new Date(stat.date).toLocaleDateString('ar-EG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                                                        {formatCairoDateKeyAr(stat.date, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                                                     </span>
                                                 </div>
                                                 <div className="text-indigo-300 text-sm flex gap-4">
