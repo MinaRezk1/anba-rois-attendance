@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.6';
+const APP_VERSION = '2026.09.19.7';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -155,7 +155,7 @@ const getStudentTotalPoints = (student) => (
     Number(student?.points || 0) + Number(student?.previousYearsPoints || 0)
 );
 
-const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v7';
+const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v8';
 
 const LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY = {
     "انطونطارق": 69,
@@ -355,10 +355,12 @@ const filterToApprovedRoster = (items) => Array.isArray(items)
             ? 'مينا ميلاد'
             : student.name;
         const rosterGrade = getRosterGrade(correctedName);
+        const rosterPhone = ROSTER_PHONE_BY_KEY[normalizeRosterStudentName(correctedName)];
         return {
             ...student,
             name: correctedName,
             ...(rosterGrade ? { grade: rosterGrade } : {}),
+            phone: rosterPhone !== undefined ? rosterPhone : (student.phone || ''),
         };
     })
     : [];
@@ -1534,7 +1536,7 @@ const App = () => {
                 const dbItems = docSnap.data()?.items;
                 if (Array.isArray(dbItems)) {
                     const approvedItems = filterToApprovedRoster(dbItems);
-                    const migrationKey = 'church_attendance_roster_migration_2026_09_19_84_v4';
+                    const migrationKey = 'church_attendance_roster_migration_2026_09_19_84_v8';
                     const migrationDone = localStorage.getItem(migrationKey) === 'done';
                     const storedMigrationVersion = docSnap.data()?.rosterMigrationVersion || '';
                     const normalizedDbRoster = dbItems.map(s => normalizeRosterStudentName(s?.name)).filter(Boolean);
