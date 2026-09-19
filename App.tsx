@@ -9,6 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
+const APP_VERSION = '2026.09.19.3';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -218,12 +219,52 @@ const isApprovedRosterStudent = (student) => Boolean(
     student && APPROVED_STUDENT_ROSTER_KEYS.has(normalizeRosterStudentName(student.name))
 );
 
+const FIRST_SECONDARY_ROSTER_NAMES = [
+    "أمير رأفت ميخائيل","أمير رأفت وهبة","بافلي هاني عدلي","بولا انطون جرجس","بولا فيليب فوزي",
+    "بيشوي جرجس فتحي","بيشوي جوزيف وجدي","جورج كرم عبدة","جيوفاني رؤوف وهبة","رامز عماد عبيد",
+    "استيفن جورج","فادي عادل عريان","فيلوباتير أسامة رمسيس","فيلوباتير عصام جرجس","فيلوباتير عماد عبيد",
+    "فيلوباتير وليد حنين","كيرلس عادل","كيرلس نادي فرح","كيرلس هاني فكري","كيفين رامي حنا",
+    "كيفين هاني عزيز","مارسيليو سامر سعيد","مايكل طارق عوض","مينا هاني سمير","يوسف مايكل عجيب","يوسف روماني"
+];
+
+const SECOND_SECONDARY_ROSTER_NAMES = [
+    "اندرو صفوت واصف قزمان","أنطون طارق","توماس اشرف","جوناثان ممدوح لبيب","سبستيان ممدوح فتحي عزمي",
+    "كيرلس اسامة حنا","يوسف عادل عريان","يوسف مصباح وليم حنا","ماريو ممدوح","انطونيوس سمر عزيز",
+    "بافلي جورج","توني سعيد جابر","دانيال يوسف","فيلوباتير خلف منقريوس","كيرلس ميالد يوسف فهيم",
+    "كيرلس نادي","مارك هاني","مينا جرجس حليم","ابانوب ايليا ملك","ابانوب داود بخيت",
+    "بولا ميالد عوض الله","بولا ميالد عوض اللة","كيرلس فليب فوزي","ماركو عاطف","مارك ايهاب صلاح",
+    "مرقص معوض مرقص","نوفير جورج طانيوس داود","نوفير باسلي","مينا ايهاب عطالله عطية"
+];
+
+const THIRD_SECONDARY_ROSTER_NAMES = [
+    "فيلوباتير عادل","جرجس صابر","فيلوباتير ماهر","انطونيوس سامح","يوسف جورج","بولا مجدي",
+    "ديفيد هاني","نوفير ماجد","بيتر عماد","بافلي سمير","كيرلس وجدي","جوفاني مايكل","ديفيد سامح",
+    "فيلوباتير امجد","فادي ايهاب","مكاريوس عاطف","ابانوب هاني","جوفاني هاني","ابرام ياسر",
+    "جورج وجيه","توني ريمون","مينا هاني (بخيت)","مينا هاني بخيت","جرجس نبيل","جورج شريف",
+    "كيرلس ماجد","استيفن منير","جوسيان جرجس","مينا ميلاد","مينا ميالد","نوفير مايكل","ماريو وائل"
+];
+
+const ROSTER_GRADE_BY_KEY = new Map([
+    ...FIRST_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'أولى ثانوي']),
+    ...SECOND_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'تانية ثانوي']),
+    ...THIRD_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'تالتة ثانوي']),
+]);
+
+const getRosterGrade = (name) => ROSTER_GRADE_BY_KEY.get(normalizeRosterStudentName(name)) || '';
+
 const filterToApprovedRoster = (items) => Array.isArray(items) ? items
     .filter(isApprovedRosterStudent)
-    .map(student => normalizeRosterStudentName(student.name) === normalizeRosterStudentName('مينا ميالد')
-        ? { ...student, name: 'مينا ميلاد' }
-        : student
-    ) : [];
+    .map(student => {
+        const correctedName = normalizeRosterStudentName(student.name) === normalizeRosterStudentName('مينا ميالد')
+            ? 'مينا ميلاد'
+            : student.name;
+        const rosterGrade = getRosterGrade(correctedName);
+        return {
+            ...student,
+            name: correctedName,
+            ...(rosterGrade ? { grade: rosterGrade } : {}),
+        };
+    }) : [];
 
 // --- Badges & Milestones Config ---
 const getCurrentMonthPrefix = () => getCairoMonthPrefix();
@@ -1295,6 +1336,45 @@ const App = () => {
     });
     const [isIOSDevice, setIsIOSDevice] = useState(false);
     const [showIOSInstallGuide, setShowIOSInstallGuide] = useState(false);
+
+    useEffect(() => {
+        const refreshClientForNewVersion = async () => {
+            const storedVersion = localStorage.getItem('church_attendance_app_version');
+            if (storedVersion && storedVersion !== APP_VERSION) {
+                localStorage.setItem('church_attendance_app_version', APP_VERSION);
+                try {
+                    if ('caches' in window) {
+                        const cacheNames = await caches.keys();
+                        await Promise.all(cacheNames.map(name => caches.delete(name)));
+                    }
+                } catch (e) {
+                    console.warn('Cache cleanup failed:', e);
+                }
+                try {
+                    if ('serviceWorker' in navigator) {
+                        const registrations = await navigator.serviceWorker.getRegistrations();
+                        await Promise.all(registrations.map(registration => registration.unregister()));
+                    }
+                } catch (e) {
+                    console.warn('Service worker cleanup failed:', e);
+                }
+                window.location.reload();
+                return;
+            }
+
+            localStorage.setItem('church_attendance_app_version', APP_VERSION);
+            try {
+                if ('serviceWorker' in navigator) {
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    await Promise.all(registrations.map(registration => registration.update()));
+                }
+            } catch (e) {
+                console.warn('Service worker update check failed:', e);
+            }
+        };
+
+        refreshClientForNewVersion();
+    }, []);
 
     useEffect(() => {
         const handleBeforeInstallPrompt = (e: any) => {
@@ -2613,6 +2693,31 @@ const App = () => {
                         <p className="text-lg text-indigo-300 mt-1">اجتماع الأنبا رويس - كنيسة مارمينا</p>
                     </div>
                     <div className="flex items-center gap-2 md:gap-4">
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                try {
+                                    if ('caches' in window) {
+                                        const cacheNames = await caches.keys();
+                                        await Promise.all(cacheNames.map(name => caches.delete(name)));
+                                    }
+                                    if ('serviceWorker' in navigator) {
+                                        const registrations = await navigator.serviceWorker.getRegistrations();
+                                        await Promise.all(registrations.map(registration => registration.unregister()));
+                                    }
+                                    localStorage.setItem('church_attendance_app_version', APP_VERSION);
+                                    window.location.reload();
+                                } catch (e) {
+                                    console.error('Manual cache cleanup failed:', e);
+                                    window.location.reload();
+                                }
+                            }}
+                            className="bg-indigo-800 hover:bg-indigo-700 text-white p-2 rounded-full transition-colors"
+                            title="تحديث التطبيق وتنظيف الكاش"
+                            aria-label="تحديث التطبيق وتنظيف الكاش"
+                        >
+                            🔄
+                        </button>
                         {isMinaAdmin && (
                             <button 
                                 onClick={() => setActiveView('badge_alerts')}
