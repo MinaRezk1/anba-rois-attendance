@@ -1827,6 +1827,15 @@ const App = () => {
                     throw new Error('Invalid backup structure');
                 }
 
+                const isValidHistoryRecord = (record) =>
+                    record &&
+                    typeof record === 'object' &&
+                    typeof record.date === 'string' &&
+                    /^\d{4}-\d{2}-\d{2}$/.test(record.date) &&
+                    typeof record.type === 'string' &&
+                    record.type.trim().length > 0 &&
+                    Number.isFinite(Number(record.points));
+
                 const isValidStudent = (student) =>
                     student &&
                     typeof student === 'object' &&
@@ -1834,7 +1843,7 @@ const App = () => {
                     student.id.trim().length > 0 &&
                     typeof student.name === 'string' &&
                     student.name.trim().length > 0 &&
-                    (student.attendanceHistory === undefined || Array.isArray(student.attendanceHistory)) &&
+                    (student.attendanceHistory === undefined || (Array.isArray(student.attendanceHistory) && student.attendanceHistory.every(isValidHistoryRecord))) &&
                     (student.points === undefined || Number.isFinite(Number(student.points)));
 
                 const isValidAdmin = (admin) =>
@@ -1855,7 +1864,18 @@ const App = () => {
                         ...student,
                         name: student.name.trim(),
                         points: Number(student.points ?? 0),
-                        attendanceHistory: Array.isArray(student.attendanceHistory) ? student.attendanceHistory : [],
+                        attendanceHistory: Array.isArray(student.attendanceHistory)
+                            ? student.attendanceHistory.map(record => ({
+                                ...record,
+                                id: typeof record.id === 'string' && record.id.trim() ? record.id : generateId(),
+                                date: record.date,
+                                points: Number(record.points),
+                                type: record.type.trim(),
+                                typeName: typeof record.typeName === 'string' && record.typeName.trim() ? record.typeName.trim() : 'نشاط',
+                                description: typeof record.description === 'string' && record.description.trim() ? record.description.trim() : null,
+                                recordedBy: typeof record.recordedBy === 'string' && record.recordedBy.trim() ? record.recordedBy.trim() : 'استيراد',
+                            }))
+                            : [],
                     }));
                     setStudents(importedStudents);
                     showToast('تم استعادة بيانات شباب الأنبا رويس بنجاح.');
