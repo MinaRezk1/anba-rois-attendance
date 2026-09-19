@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.7';
+const APP_VERSION = '2026.09.19.8';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -3018,7 +3018,7 @@ const App = () => {
                                                         نقاط السنين السابقة: {student.previousYearsPoints || 0}
                                                     </div>
                                                     <div className="text-[10px] text-emerald-300 font-black text-center mt-0.5 whitespace-nowrap">
-                                                        Total Points: {getStudentTotalPoints(student)}
+                                                        إجمالي النقاط (السابق + الحالي): {getStudentTotalPoints(student)}
                                                     </div>
                                                 </div>
                                                 <span className="text-lg font-semibold flex items-center gap-2 flex-wrap">
