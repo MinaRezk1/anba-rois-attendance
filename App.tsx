@@ -1440,9 +1440,9 @@ const App = () => {
                     lastStudentsDB.current = str;
                     localStorage.setItem('church_attendance_students_v8', str);
                     setStudents(approvedItems);
-                    if (approvedItems.length !== dbItems.length) {
+                    if (JSON.stringify(approvedItems) !== JSON.stringify(dbItems)) {
                         setDoc(doc(db, 'appData', 'students_v8'), { items: approvedItems }, { merge: true })
-                            .catch(err => console.error("Error cleaning students outside current rosters:", err));
+                            .catch(err => console.error("Error syncing roster corrections:", err));
                     }
                 } else {
                     setStudents([]);
