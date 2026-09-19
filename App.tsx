@@ -2801,10 +2801,8 @@ const App = () => {
                              ) : (
                                  leaderboardStudents.map((student, index) => {
                                      const rank = index + 1;
-                                     const today = new Date();
-                                     const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-                                     const prevMonthPrefix = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
-                                     const currentMonthPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+                                     const currentMonthPrefix = getCairoMonthPrefix();
+                                     const prevMonthPrefix = getCairoMonthPrefixOffset(-1);
                                      const filterPrefix = leaderboardFilter === 'prev_month' ? prevMonthPrefix : (leaderboardFilter === 'current_month' ? currentMonthPrefix : undefined);
 
                                      const studentBadges = BADGES_CONFIG.filter(b => {
