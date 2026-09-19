@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.4';
+const APP_VERSION = '2026.09.19.5';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -151,7 +151,67 @@ const ROSTER_GRADE_BY_KEY = new Map<string, string>([
 
 const getRosterGrade = (name) => ROSTER_GRADE_BY_KEY.get(normalizeRosterStudentName(name)) || '';
 
-const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v2';
+const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v3';
+
+const LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY = {
+    "انطونطارق": 69,
+    "ابانوبايلياملك": 85,
+    "ابانوبداودبخيت": 258,
+    "ابانوبهاني": 20,
+    "ابرامياسر": 253,
+    "استيفنمنير": 95,
+    "اندروصفوتواصفقزمان": 70,
+    "انطونيوسسامح": 76,
+    "انطونيوسسمرعزيز": 201,
+    "بافليجورج": 10,
+    "بافليسمير": 0,
+    "بولامجدي": 81,
+    "بولاميالدعوضالله": 0,
+    "توماساشرف": 0,
+    "تونيريمون": 0,
+    "تونيسعيدجابر": 308,
+    "جرجسصابر": 40,
+    "جرجسنبيل": 232,
+    "جورجشريف": 147,
+    "جورجوجيه": 264,
+    "جوسيانجرجس": 223,
+    "جوفانيمايكل": 678,
+    "جوفانيهاني": 67,
+    "جوناثانممدوحلبيب": 0,
+    "دانياليوسف": 0,
+    "ديفيدسامح": 193,
+    "ديفيدهاني": 90,
+    "سبستيانممدوحفتحيعزمي": 32,
+    "فاديايهاب": 22,
+    "فيلوباتيرامجد": 81,
+    "فيلوباتيرخلفمنقريوس": 35,
+    "فيلوباتيرعادل": 90,
+    "فيلوباتيرماهر": 166,
+    "كيرلساسامهحنا": 0,
+    "كيرلسفليبفوزي": 10,
+    "كيرلسماجد": 429,
+    "كيرلسميالديوسففهيم": 20,
+    "كيرلسنادي": 188,
+    "كيرلسوجدي": 20,
+    "ماركايهابصلاح": 10,
+    "ماركهاني": 0,
+    "ماركوعاطف": 182,
+    "ماريوممدوح": 60,
+    "ماريووائل": 666,
+    "مرقصمعوضمرقص": 39,
+    "مكاريوسعاطف": 0,
+    "ميناايهابعطاللهعطيه": 0,
+    "ميناجرجسحليم": 20,
+    "ميناميلاد": 689,
+    "ميناهانيبخيت": 20,
+    "نوفيرباسلي": 188,
+    "نوفيرجورجطانيوسداود": 445,
+    "نوفيرماجد": 0,
+    "نوفيرمايكل": 359,
+    "يوسفجورج": 182,
+    "يوسفعادلعريان": 0,
+    "يوسفمصباحوليمحنا": 94
+};
 
 const buildExactCurrentRoster = (existingItems) => {
     const existing = Array.isArray(existingItems) ? existingItems : [];
@@ -177,7 +237,7 @@ const buildExactCurrentRoster = (existingItems) => {
                     ...existingStudent,
                     name: canonicalName,
                     ...(grade ? { grade } : {}),
-                    previousYearsPoints: Number(existingStudent.previousYearsPoints || existingStudent.previousPoints || 0) || 0,
+                    previousYearsPoints: Number(LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY[normalizeRosterStudentName(canonicalName)] ?? 0) || 0,
                     points: 0,
                     lastAttended: null,
                     attendanceHistory: [],
@@ -190,7 +250,7 @@ const buildExactCurrentRoster = (existingItems) => {
                 phone: '',
                 grade: grade || '',
                 points: 0,
-                previousYearsPoints: 0,
+                previousYearsPoints: Number(LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY[normalizeRosterStudentName(canonicalName)] ?? 0) || 0,
                 lastAttended: null,
                 attendanceHistory: [],
             };
@@ -1373,6 +1433,7 @@ const App = () => {
 
     const lastStudentsDB = useRef<string>(localStorage.getItem('church_attendance_students_v8') || '[]');
     const lastAdminsDB = useRef<string>(localStorage.getItem('church_attendance_admins_v8') || '[]');
+    const isRosterMigrationInProgress = useRef(false);
 
     // Initialize Data from Firebase with Offline-Resilient Merging
     useEffect(() => {
@@ -1381,7 +1442,7 @@ const App = () => {
                 const dbItems = docSnap.data()?.items;
                 if (Array.isArray(dbItems)) {
                     const approvedItems = filterToApprovedRoster(dbItems);
-                    const migrationKey = 'church_attendance_roster_migration_2026_09_19_84_v2';
+                    const migrationKey = 'church_attendance_roster_migration_2026_09_19_84_v3';
                     const migrationDone = localStorage.getItem(migrationKey) === 'done';
                     const storedMigrationVersion = docSnap.data()?.rosterMigrationVersion || '';
                     const normalizedDbRoster = dbItems.map(s => normalizeRosterStudentName(s?.name)).filter(Boolean);
@@ -1389,7 +1450,11 @@ const App = () => {
                     const rosterMatchesExactly = normalizedDbRoster.length === expectedRosterKeys.length
                         && normalizedDbRoster.every((key, index) => key === expectedRosterKeys[index]);
                     const needsSeasonReset = storedMigrationVersion !== CURRENT_ROSTER_MIGRATION_VERSION;
+
+                    if (isRosterMigrationInProgress.current) return;
+
                     if (!migrationDone && (needsSeasonReset || !rosterMatchesExactly || dbItems.length !== 84)) {
+                        isRosterMigrationInProgress.current = true;
                         const exactRoster = buildExactCurrentRoster(dbItems);
                         setDoc(doc(db, 'appData', 'students_pre_roster_2026_backup'), {
                             items: dbItems,
@@ -1401,9 +1466,24 @@ const App = () => {
                                 rosterMigrationVersion: CURRENT_ROSTER_MIGRATION_VERSION,
                                 seasonReset: true,
                             }, { merge: true }))
-                            .then(() => localStorage.setItem(migrationKey, 'done'))
-                            .catch(err => console.error("Error applying 84-student roster migration:", err));
+                            .then(() => {
+                                const str = JSON.stringify(exactRoster);
+                                lastStudentsDB.current = str;
+                                localStorage.setItem('church_attendance_students_v8', str);
+                                localStorage.setItem(migrationKey, 'done');
+                                setStudents(exactRoster);
+                                showToast('✅ تم تحديث كشف الـ84 طالب وتصفير النقاط الحالية وترحيل النقاط القديمة.');
+                            })
+                            .catch(err => {
+                                console.error("Error applying 84-student roster migration:", err);
+                                showToast('❌ حصل خطأ أثناء تحديث كشف الطلاب. البيانات القديمة محفوظة.');
+                            })
+                            .finally(() => {
+                                isRosterMigrationInProgress.current = false;
+                            });
+                        return;
                     }
+
                     const str = JSON.stringify(approvedItems);
                     lastStudentsDB.current = str;
                     localStorage.setItem('church_attendance_students_v8', str);
@@ -1467,6 +1547,7 @@ const App = () => {
 
     // Persist to Firestore and localStorage
     useEffect(() => {
+        if (isRosterMigrationInProgress.current) return;
         if (isInitialMount.current) {
             isInitialMount.current = false;
             return;
