@@ -90,7 +90,7 @@ const getAttendanceWindow = (date = new Date()) => {
         return {
             kind: parts.hour < 16 ? 'early' : 'late',
             isWithinAllowedTime: parts.hour >= 15 && parts.hour < 17,
-            message: '⚠️ الوقت الحالي ليس ضمن وقت الاجتماع (3–5 م)',
+            message: '⚠️ الحضور المبكر (+10) متاح من 3:00 إلى 3:15 م فقط، والحضور المتأخر متاح بعد ذلك حتى 5 م.',
         };
     }
 
@@ -664,7 +664,7 @@ const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = 
 
         return {
             canAddMass: targetIsFirstFriday && !hasReceivedMassThisMonth && meetingTimeAllowed,
-            canAddEarly: targetIsFriday && !targetIsFirstFriday && !hasReceivedAttendanceToday && meetingTimeAllowed && (!isHistoricalEdit ? currentWindow?.kind === 'early' : true),
+            canAddEarly: targetIsFriday && !targetIsFirstFriday && !hasReceivedAttendanceToday && meetingTimeAllowed && (!isHistoricalEdit ? currentWindow?.kind === 'early' && getCairoDateParts().hour === 15 && getCairoDateParts().minute < 15 : true),
             canAddLate: targetIsFriday && !targetIsFirstFriday && !hasReceivedAttendanceToday && meetingTimeAllowed && (!isHistoricalEdit ? currentWindow?.kind === 'late' : true),
             canAddConfession: canAddConfession,
             canAddGamesStation: regularMeetingTimeAllowed && !hasReceivedGamesStationToday,
@@ -1456,7 +1456,7 @@ const App = () => {
             const allowed = type === 'monthlyMass'
                 ? windowState.kind === 'monthlyMass' && windowState.isWithinAllowedTime
                 : type === 'early'
-                    ? windowState.kind === 'early' && windowState.isWithinAllowedTime
+                    ? windowState.kind === 'early' && windowState.isWithinAllowedTime && getCairoDateParts().hour === 15 && getCairoDateParts().minute < 15
                     : type === 'late'
                         ? windowState.kind === 'late' && windowState.isWithinAllowedTime
                         : windowState.isWithinAllowedTime && windowState.kind !== 'monthlyMass';
@@ -2092,13 +2092,13 @@ const App = () => {
                         badgeTitle: `وسام: ${badge.name}`,
                         badgeEmoji: badge.emoji,
                         category: 'cumulative',
-                        categoryLabel: 'أوسمة تراكمية وموسمية',
+                        categoryLabel: 'أوسمة موسمية',
                         periodLabel: 'إنجاز تراكمي',
-                        description: badge.description,
+                        description: `${badge.description} — مستحق لمكافأة موسمية +20 نقطة (تُضاف يدويًا).`,
                         progress: badge.getProgress(history, pts, undefined),
                         isAwarded: !!awardRecord,
                         awardedRecord: awardRecord,
-                        suggestedPoints: badge.id === 'points_milestone_1000' ? 50 : 20,
+                        suggestedPoints: 20,
                         color: badge.color
                     });
                 }
