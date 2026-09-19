@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.6';
+const APP_VERSION = '2026.09.19.7';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -150,6 +150,10 @@ const ROSTER_GRADE_BY_KEY = new Map<string, string>([
 ]);
 
 const getRosterGrade = (name) => ROSTER_GRADE_BY_KEY.get(normalizeRosterStudentName(name)) || '';
+
+const getStudentTotalPoints = (student) => (
+    Number(student?.points || 0) + Number(student?.previousYearsPoints || 0)
+);
 
 const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v4';
 
@@ -3012,6 +3016,9 @@ const App = () => {
                                                     <div className="text-amber-400 font-bold text-xl">{student.points || 0}</div>
                                                     <div className="text-[9px] text-sky-300/90 font-bold text-center mt-1 whitespace-nowrap">
                                                         نقاط السنين السابقة: {student.previousYearsPoints || 0}
+                                                    </div>
+                                                    <div className="text-[10px] text-emerald-300 font-black text-center mt-0.5 whitespace-nowrap">
+                                                        Total Points: {getStudentTotalPoints(student)}
                                                     </div>
                                                 </div>
                                                 <span className="text-lg font-semibold flex items-center gap-2 flex-wrap">
