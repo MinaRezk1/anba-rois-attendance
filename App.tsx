@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.3';
+const APP_VERSION = '2026.09.19.4';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -151,7 +151,7 @@ const ROSTER_GRADE_BY_KEY = new Map<string, string>([
 
 const getRosterGrade = (name) => ROSTER_GRADE_BY_KEY.get(normalizeRosterStudentName(name)) || '';
 
-const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v1';
+const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v2';
 
 const buildExactCurrentRoster = (existingItems) => {
     const existing = Array.isArray(existingItems) ? existingItems : [];
@@ -177,6 +177,10 @@ const buildExactCurrentRoster = (existingItems) => {
                     ...existingStudent,
                     name: canonicalName,
                     ...(grade ? { grade } : {}),
+                    previousYearsPoints: Number(existingStudent.previousYearsPoints || existingStudent.previousPoints || 0) || 0,
+                    points: 0,
+                    lastAttended: null,
+                    attendanceHistory: [],
                 };
             }
 
@@ -186,6 +190,7 @@ const buildExactCurrentRoster = (existingItems) => {
                 phone: '',
                 grade: grade || '',
                 points: 0,
+                previousYearsPoints: 0,
                 lastAttended: null,
                 attendanceHistory: [],
             };
@@ -1376,13 +1381,15 @@ const App = () => {
                 const dbItems = docSnap.data()?.items;
                 if (Array.isArray(dbItems)) {
                     const approvedItems = filterToApprovedRoster(dbItems);
-                    const migrationKey = 'church_attendance_roster_migration_2026_09_19_84_v1';
+                    const migrationKey = 'church_attendance_roster_migration_2026_09_19_84_v2';
                     const migrationDone = localStorage.getItem(migrationKey) === 'done';
+                    const storedMigrationVersion = docSnap.data()?.rosterMigrationVersion || '';
                     const normalizedDbRoster = dbItems.map(s => normalizeRosterStudentName(s?.name)).filter(Boolean);
                     const expectedRosterKeys = APPROVED_STUDENT_ROSTER_NAMES.map(normalizeRosterStudentName).filter((key, index, list) => list.indexOf(key) === index);
                     const rosterMatchesExactly = normalizedDbRoster.length === expectedRosterKeys.length
                         && normalizedDbRoster.every((key, index) => key === expectedRosterKeys[index]);
-                    if (!migrationDone && (!rosterMatchesExactly || dbItems.length !== 84)) {
+                    const needsSeasonReset = storedMigrationVersion !== CURRENT_ROSTER_MIGRATION_VERSION;
+                    if (!migrationDone && (needsSeasonReset || !rosterMatchesExactly || dbItems.length !== 84)) {
                         const exactRoster = buildExactCurrentRoster(dbItems);
                         setDoc(doc(db, 'appData', 'students_pre_roster_2026_backup'), {
                             items: dbItems,
@@ -1392,6 +1399,7 @@ const App = () => {
                             .then(() => setDoc(doc(db, 'appData', 'students_v8'), {
                                 items: exactRoster,
                                 rosterMigrationVersion: CURRENT_ROSTER_MIGRATION_VERSION,
+                                seasonReset: true,
                             }, { merge: true }))
                             .then(() => localStorage.setItem(migrationKey, 'done'))
                             .catch(err => console.error("Error applying 84-student roster migration:", err));
@@ -2839,7 +2847,12 @@ const App = () => {
                                     <div key={student.id} id={`student-card-${student.id}`} className={`bg-indigo-900/70 rounded-xl shadow-md border overflow-hidden ${hasAllMonthly ? 'border-amber-400/80 shadow-amber-500/10 ring-1 ring-amber-400/20' : 'border-indigo-800/50'}`}>
                                         <div className="p-4 flex justify-between items-center cursor-pointer hover:bg-indigo-800/50 transition-colors" onClick={() => toggleStudentDetails(student.id)}>
                                             <div className='flex items-center gap-4 flex-wrap'>
-                                                <div className="text-amber-400 font-bold text-xl w-8 text-center">{student.points || 0}</div>
+                                                <div className="flex flex-col items-center justify-center min-w-[96px] leading-tight">
+                                                    <div className="text-amber-400 font-bold text-xl">{student.points || 0}</div>
+                                                    <div className="text-[9px] text-sky-300/90 font-bold text-center mt-1 whitespace-nowrap">
+                                                        نقاط السنين السابقة: {student.previousYearsPoints || 0}
+                                                    </div>
+                                                </div>
                                                 <span className="text-lg font-semibold flex items-center gap-2 flex-wrap">
                                                     <span>{student.name}</span>
                                                     {student.grade && (
