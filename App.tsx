@@ -39,6 +39,19 @@ const getCairoDateKey = (date = new Date()) => {
 
 const getCairoMonthPrefix = (date = new Date()) => getCairoDateKey(date).slice(0, 7);
 
+const getCairoMonthPrefixOffset = (offset, date = new Date()) => {
+    const parts = getCairoDateParts(date);
+    const shifted = new Date(Date.UTC(parts.year, parts.month - 1 + offset, 1, 12, 0, 0));
+    return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}`;
+};
+
+const getArabicMonthNameFromPrefix = (prefix) => {
+    const [year, month] = String(prefix || '').split('-').map(Number);
+    if (!year || !month) return '';
+    const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيه', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+    return `${months[month - 1]} ${year}`;
+};
+
 const isFridayDateKey = (dateKey) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey || '')) return false;
     return new Date(`${dateKey}T12:00:00Z`).getUTCDay() === 5;
@@ -507,22 +520,17 @@ const getStudentMoney = (student) => {
 };
 
 
-const getFirstFridayOfFollowingMonth = (baseDate = new Date()) => {
-    // Next month:
-    const nextMonthDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 1);
-    const d = new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth(), 1);
-    while (d.getDay() !== 5) {
-        d.setDate(d.getDate() + 1);
-    }
-    return d.toLocaleDateString('en-CA');
+const formatDateKey = (date) => {
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
 };
 
-const getFirstFridayOfSpecificMonth = (year, monthZeroIndexed) => {
-    const d = new Date(year, monthZeroIndexed, 1);
-    while (d.getDay() !== 5) {
-        d.setDate(d.getDate() + 1);
+const getFirstFridayOfFollowingMonth = (baseDate = new Date()) => {
+    const parts = getCairoDateParts(baseDate);
+    const d = new Date(Date.UTC(parts.year, parts.month, 1, 12, 0, 0));
+    while (d.getUTCDay() !== 5) {
+        d.setUTCDate(d.getUTCDate() + 1);
     }
-    return d.toLocaleDateString('en-CA');
+    return formatDateKey(d);
 };
 
 const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = false, selectedDate, isSuperAdmin = false }) => {
@@ -641,7 +649,7 @@ const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = 
             windowMessage: isHistoricalEdit ? null : (currentWindow?.message || null),
             meetingTimeLabel: getMeetingTimeMessage(),
         };
-    }, [student, selectedDate]);
+    }, [student, selectedDate, isSuperAdmin, fromScan]);
 
     const handleAddPoints = (type, points, description = null) => {
         addPoints(student.id, type, points, fromScan, description);
@@ -1124,8 +1132,6 @@ const App = () => {
     const [studentForPointsEdit, setStudentForPointsEdit] = useState(null);
     const [targetPointsInput, setTargetPointsInput] = useState('');
     const [targetMoneyInput, setTargetMoneyInput] = useState('');
-    const [lastEditedField, setLastEditedField] = useState('points');
-    
     // Super admin state & modals
     const [isAddStudentModalOpen, setAddStudentModalOpen] = useState(false);
     const [isAdminManagementModalOpen, setAdminManagementModalOpen] = useState(false);
@@ -1204,12 +1210,14 @@ const App = () => {
     useEffect(() => {
         const unsubStudents = onSnapshot(doc(db, 'appData', 'students_v8'), (docSnap) => {
             if (docSnap.exists()) {
-                const dbItems = docSnap.data()?.items || [];
-                if (Array.isArray(dbItems) && dbItems.length > 0) {
+                const dbItems = docSnap.data()?.items;
+                if (Array.isArray(dbItems)) {
                     const str = JSON.stringify(dbItems);
                     lastStudentsDB.current = str;
                     localStorage.setItem('church_attendance_students_v8', str);
                     setStudents(dbItems);
+                } else {
+                    setStudents([]);
                 }
             } else {
                 const local = localStorage.getItem('church_attendance_students_v8');
@@ -1228,12 +1236,14 @@ const App = () => {
 
         const unsubAdmins = onSnapshot(doc(db, 'appData', 'admins_v8'), (docSnap) => {
             if (docSnap.exists()) {
-                const dbItems = docSnap.data()?.items || [];
-                if (Array.isArray(dbItems) && dbItems.length > 0) {
+                const dbItems = docSnap.data()?.items;
+                if (Array.isArray(dbItems)) {
                     const str = JSON.stringify(dbItems);
                     lastAdminsDB.current = str;
                     localStorage.setItem('church_attendance_admins_v8', str);
                     setAdmins(dbItems);
+                } else {
+                    setAdmins(defaultAdminsData);
                 }
             } else {
                 const local = localStorage.getItem('church_attendance_admins_v8');
@@ -1631,6 +1641,14 @@ const App = () => {
             return;
         }
 
+        const duplicateName = students.some(s =>
+            s.id !== studentId && s.name.trim().toLowerCase() === newName.toLowerCase()
+        );
+        if (duplicateName) {
+            showToast(`"${newName}" موجود بالفعل في القائمة`);
+            return;
+        }
+
         setStudents(prev => prev.map(s => {
             if (s.id === studentId) {
                 return { ...s, name: newName, phone: newPhone };
@@ -1654,6 +1672,10 @@ const App = () => {
     };
     
     const confirmDeleteStudent = () => {
+        if (!loggedInAdmin) {
+            showToast('يجب تسجيل الدخول أولاً.');
+            return;
+        }
         if (!studentToDelete) return;
         const updatedStudents = students.filter(s => s.id !== studentToDelete.id);
         setStudents(updatedStudents);
@@ -1667,6 +1689,10 @@ const App = () => {
     };
 
     const confirmDeletePointEntry = () => {
+        if (!loggedInAdmin) {
+            showToast('يجب تسجيل الدخول أولاً.');
+            return;
+        }
         if (!pointToDelete) return;
         const { studentId, record } = pointToDelete;
 
@@ -1759,10 +1785,13 @@ const App = () => {
     const handleExportData = () => {
         const data = {
             students: students,
-            admins: admins,
             timestamp: new Date().toISOString(),
-            version: 'v6'
+            version: 'v8'
         };
+
+        if (loggedInAdmin?.isSuperAdmin) {
+            data.admins = admins;
+        }
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -1789,11 +1818,13 @@ const App = () => {
                     setStudents(data.students);
                     showToast('تم استعادة بيانات شباب الأنبا رويس بنجاح.');
                 }
-                if (data.admins && Array.isArray(data.admins) && loggedInAdmin) { // Only update admins if logged in
-                     setAdmins(data.admins);
-                     showToast('تم استعادة بيانات الخدام بنجاح.');
-                } else if (!loggedInAdmin) {
-                     showToast('تم عرض بيانات شباب الأنبا رويس (وضع المشاهدة).');
+                if (data.admins && Array.isArray(data.admins)) {
+                    if (loggedInAdmin?.isSuperAdmin) {
+                        setAdmins(data.admins);
+                        showToast('تم استعادة بيانات الخدام بنجاح.');
+                    } else {
+                        showToast('استعادة بيانات الخدام متاحة للسوبر أدمن فقط.');
+                    }
                 }
                 setBackupModalOpen(false);
             } catch (error) {
@@ -1819,21 +1850,11 @@ const App = () => {
     }, [sortedStudents, searchTerm]);
 
     const prevMonthName = useMemo(() => {
-        const today = new Date();
-        const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        const months = [
-            'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيه',
-            'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-        ];
-        return months[prevMonthDate.getMonth()];
+        return getArabicMonthNameFromPrefix(getCairoMonthPrefixOffset(-1)).split(' ')[0];
     }, []);
 
     const lastMonthChampions = useMemo(() => {
-        const today = new Date();
-        const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        const y = prevMonthDate.getFullYear();
-        const m = String(prevMonthDate.getMonth() + 1).padStart(2, '0');
-        const prevMonthPrefix = `${y}-${m}`;
+        const prevMonthPrefix = getCairoMonthPrefixOffset(-1);
 
         return [...students]
             .map(student => {
@@ -1853,18 +1874,9 @@ const App = () => {
 
         // --- Badges & Achievements Persistent Notification Center ---
     const allBadgeAlerts = useMemo(() => {
-        const today = new Date();
-        const getMonthStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        const currentMonthPrefix = getMonthStr(today);
-        const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        const prevMonthPrefix = getMonthStr(prevMonthDate);
-
-        const getArabicMonthName = (prefix) => {
-            const [y, m] = prefix.split('-').map(Number);
-            const d = new Date(y, m - 1, 1);
-            const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيه', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-            return `${months[d.getMonth()]} ${y}`;
-        };
+        const currentMonthPrefix = getCairoMonthPrefix();
+        const prevMonthPrefix = getCairoMonthPrefixOffset(-1);
+        const getArabicMonthName = getArabicMonthNameFromPrefix;
 
         const alerts = [];
 
@@ -2021,13 +2033,19 @@ const App = () => {
     }, [allBadgeAlerts, badgeAlertSearch, badgeAlertsFilter]);
 
     const handleQuickAwardBadgePoints = (alertItem, customPoints = undefined) => {
-        if (!loggedInAdmin) {
-            showToast('يجب تسجيل الدخول لإضافة النقاط.');
+        if (!loggedInAdmin || !isMinaAdmin) {
+            showToast('هذه المكافآت متاحة لمسئول النظام فقط.');
             return;
         }
         const pts = customPoints || alertItem.suggestedPoints || 15;
         const targetStudent = students.find(s => s.id === alertItem.studentId);
         if (!targetStudent) return;
+
+        const targetMeta = `badge_reward_${alertItem.id}`;
+        if ((targetStudent.attendanceHistory || []).some(h => h.meta === targetMeta)) {
+            showToast('تم منح مكافأة هذا الوسام بالفعل.');
+            return;
+        }
 
         const recordDate = getCairoDateKey();
         const newRecord = {
@@ -2038,7 +2056,7 @@ const App = () => {
             typeName: alertItem.category.startsWith('monthly') ? 'مكافأة تجميع الأوسمة' : 'مكافأة إنجاز وسام',
             description: `مكافأة ${alertItem.badgeTitle} (${alertItem.periodLabel})`,
             recordedBy: loggedInAdmin.name,
-            meta: `badge_reward_${alertItem.id}`
+            meta: targetMeta
         };
 
         const updatedStudents = students.map(s => {
@@ -2059,16 +2077,8 @@ const App = () => {
 
 
     const leaderboardStudents = useMemo(() => {
-        const today = new Date();
-        const getMonthStr = (d) => {
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, '0');
-            return `${y}-${m}`;
-        };
-        const currentMonthPrefix = getMonthStr(today);
-        
-        const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        const prevMonthPrefix = getMonthStr(prevMonthDate);
+        const currentMonthPrefix = getCairoMonthPrefix();
+        const prevMonthPrefix = getCairoMonthPrefixOffset(-1);
 
         return [...students]
             .map(student => {
@@ -2100,10 +2110,8 @@ const App = () => {
         students.forEach(std => {
             (std.attendanceHistory || []).forEach(record => {
                 if (!record.date) return;
-                const [year, month, day] = record.date.split('-').map(Number);
-                const localDate = new Date(year, month - 1, day);
-                if (localDate.getDay() !== 5) return; // 5 is Friday
-                
+                if (!isFridayDateKey(record.date)) return;
+
                 if (!stats[record.date]) {
                     stats[record.date] = {
                         date: record.date,
@@ -2113,7 +2121,9 @@ const App = () => {
                     };
                 }
                 stats[record.date].totalPoints += record.points;
-                stats[record.date].uniqueAttendees.add(std.id);
+                if (['early', 'late', 'monthlyMass'].includes(record.type)) {
+                    stats[record.date].uniqueAttendees.add(std.id);
+                }
                 
                 // Count occurrence of each type (e.g. Early: 5, Late: 2)
                 const typeLabel = record.typeName || record.type;
@@ -2144,15 +2154,10 @@ const App = () => {
     const openMonthlyChampionModal = (preselectedStudentId = '', defaultRank = 'المركز الأول', defaultPts = '20', monthType = 'prev') => {
         setRewardTargetMonth(monthType);
         
-        const today = new Date();
-        const baseDate = monthType === 'prev' ? new Date(today.getFullYear(), today.getMonth() - 1, 1) : today;
+        const basePrefix = monthType === 'prev' ? getCairoMonthPrefixOffset(-1) : getCairoMonthPrefix();
+        const baseDate = new Date(`${basePrefix}-01T12:00:00Z`);
         const calcFirstFriday = getFirstFridayOfFollowingMonth(baseDate);
-        
-        const getArabicMonth = (d) => {
-            const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيه', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-            return months[d.getMonth()];
-        };
-        const monthName = getArabicMonth(baseDate);
+        const monthName = getArabicMonthNameFromPrefix(basePrefix).split(' ')[0];
         
         setRewardDate(calcFirstFriday);
         setRewardRankTitle(defaultRank);
@@ -2216,7 +2221,7 @@ const App = () => {
         setBadgeRewardStudent(student);
         setBadgeRewardPoints(String(defaultPts));
         setBadgeRewardDate(getCairoDateKey());
-        const mName = new Date().toLocaleDateString('ar-EG', { month: 'long' });
+        const mName = getArabicMonthNameFromPrefix(getCairoMonthPrefix()).split(' ')[0];
         setBadgeRewardDesc(`مكافأة تجميع الأوسمة لشهر ${mName}`);
         setBadgeRewardModalOpen(true);
     };
@@ -2268,7 +2273,7 @@ const App = () => {
 
     const openPointsEditModal = (student) => {
         setStudentForPointsEdit(student);
-        const currentPts = student.pointsForLeaderboard ?? student.points ?? 0;
+        const currentPts = student.points ?? 0;
         setTargetPointsInput(String(currentPts));
         setTargetMoneyInput(String(getStudentMoney(student)));
     };
@@ -2298,7 +2303,7 @@ const App = () => {
             return;
         }
 
-        const currentPts = studentForPointsEdit.pointsForLeaderboard ?? studentForPointsEdit.points ?? 0;
+        const currentPts = studentForPointsEdit.points ?? 0;
         const diff = ptsVal - currentPts;
 
         const dateToRecord = selectedDate || getCairoDateKey();
@@ -2781,13 +2786,13 @@ const App = () => {
                                      onClick={() => setLeaderboardFilter('current_month')}
                                      className={`flex-1 min-w-[120px] text-center py-2 px-3 rounded-lg text-xs md:text-sm font-bold transition-all ${leaderboardFilter === 'current_month' ? 'bg-indigo-700 text-amber-400 font-extrabold shadow-md shadow-indigo-900/60' : 'text-indigo-300 hover:text-white hover:bg-indigo-800/20'}`}
                                  >
-                                     الشهر الحالي ({new Date().toLocaleDateString('ar-EG', { month: 'long' })})
+                                     الشهر الحالي ({getArabicMonthNameFromPrefix(getCairoMonthPrefix()).split(' ')[0]})
                                  </button>
                                  <button
                                      onClick={() => setLeaderboardFilter('prev_month')}
                                      className={`flex-1 min-w-[120px] text-center py-2 px-3 rounded-lg text-xs md:text-sm font-bold transition-all ${leaderboardFilter === 'prev_month' ? 'bg-indigo-700 text-amber-400 font-extrabold shadow-md shadow-indigo-900/60' : 'text-indigo-300 hover:text-white hover:bg-indigo-800/20'}`}
                                  >
-                                     الشهر السابق ({new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toLocaleDateString('ar-EG', { month: 'long' })})
+                                     الشهر السابق ({getArabicMonthNameFromPrefix(getCairoMonthPrefixOffset(-1)).split(' ')[0]})
                                  </button>
                              </div>
 
@@ -3946,29 +3951,31 @@ const App = () => {
                                 type="button"
                                 onClick={() => {
                                     setRewardTargetMonth('prev');
-                                    const prevDate = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+                                    const prevPrefix = getCairoMonthPrefixOffset(-1);
+                                    const prevDate = new Date(`${prevPrefix}-01T12:00:00Z`);
                                     const firstFri = getFirstFridayOfFollowingMonth(prevDate);
                                     setRewardDate(firstFri);
-                                    const mName = prevDate.toLocaleDateString('ar-EG', { month: 'long' });
+                                    const mName = getArabicMonthNameFromPrefix(prevPrefix).split(' ')[0];
                                     setRewardCustomDesc(`مكافأة ${rewardRankTitle} عن شهر ${mName}`);
                                 }}
                                 className={`py-2 px-3 rounded-lg text-xs font-bold transition-all ${rewardTargetMonth === 'prev' ? 'bg-amber-500 text-indigo-950 font-black shadow' : 'bg-indigo-900/60 text-indigo-300 hover:bg-indigo-800'}`}
                             >
-                                الشهر السابق ({new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toLocaleDateString('ar-EG', { month: 'long' })})
+                                الشهر السابق ({getArabicMonthNameFromPrefix(getCairoMonthPrefixOffset(-1)).split(' ')[0]})
                             </button>
                             <button
                                 type="button"
                                 onClick={() => {
                                     setRewardTargetMonth('current');
-                                    const curDate = new Date();
+                                    const curPrefix = getCairoMonthPrefix();
+                                    const curDate = new Date(`${curPrefix}-01T12:00:00Z`);
                                     const firstFri = getFirstFridayOfFollowingMonth(curDate);
                                     setRewardDate(firstFri);
-                                    const mName = curDate.toLocaleDateString('ar-EG', { month: 'long' });
+                                    const mName = getArabicMonthNameFromPrefix(curPrefix).split(' ')[0];
                                     setRewardCustomDesc(`مكافأة ${rewardRankTitle} عن شهر ${mName}`);
                                 }}
                                 className={`py-2 px-3 rounded-lg text-xs font-bold transition-all ${rewardTargetMonth === 'current' ? 'bg-amber-500 text-indigo-950 font-black shadow' : 'bg-indigo-900/60 text-indigo-300 hover:bg-indigo-800'}`}
                             >
-                                الشهر الحالي ({new Date().toLocaleDateString('ar-EG', { month: 'long' })})
+                                الشهر الحالي ({getArabicMonthNameFromPrefix(getCairoMonthPrefix()).split(' ')[0]})
                             </button>
                         </div>
                     </div>
@@ -4005,10 +4012,10 @@ const App = () => {
                                     onClick={() => {
                                         setRewardRankTitle(item.rank);
                                         setRewardPoints(item.pts);
-                                        const tDate = rewardTargetMonth === 'prev' 
-                                            ? new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1) 
-                                            : new Date();
-                                        const mName = tDate.toLocaleDateString('ar-EG', { month: 'long' });
+                                        const tPrefix = rewardTargetMonth === 'prev'
+                                            ? getCairoMonthPrefixOffset(-1)
+                                            : getCairoMonthPrefix();
+                                        const mName = getArabicMonthNameFromPrefix(tPrefix).split(' ')[0];
                                         setRewardCustomDesc(`مكافأة ${item.rank} عن شهر ${mName}`);
                                     }}
                                     className={`py-2 px-2 rounded-lg text-xs font-bold flex flex-col items-center gap-1 transition-all ${rewardRankTitle === item.rank ? 'bg-amber-400 text-indigo-950 font-black shadow-md' : 'bg-indigo-900/60 text-indigo-200 hover:bg-indigo-800'}`}
