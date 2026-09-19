@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.5';
+const APP_VERSION = '2026.09.19.6';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -151,7 +151,7 @@ const ROSTER_GRADE_BY_KEY = new Map<string, string>([
 
 const getRosterGrade = (name) => ROSTER_GRADE_BY_KEY.get(normalizeRosterStudentName(name)) || '';
 
-const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v3';
+const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v4';
 
 const LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY = {
     "انطونطارق": 69,
@@ -213,6 +213,67 @@ const LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY = {
     "يوسفمصباحوليمحنا": 94
 };
 
+const ROSTER_PHONE_BY_KEY = {
+    "فيلوباتير عادل": "01202821716",
+    "جرجس صابر": "01222608959",
+    "فيلوباتير ماهر": "01064383757",
+    "انطونيوس سامح": "01225365059",
+    "يوسف جورج": "01068970742",
+    "بولا مجدي": "01270041687",
+    "ديفيد هاني": "01226638735",
+    "نوفير ماجد": "01211799691",
+    "بيتر عماد": "01501609107",
+    "بافلي سمير": "01204071377",
+    "كيرلس وجدي": "01151984121",
+    "جوفاني مايكل": "01555900607",
+    "ديفيد سامح": "01212400881",
+    "فيلوباتير امجد": "01202584343",
+    "فادي ايهاب": "01211964760",
+    "مكاريوس عاطف": "01226609164",
+    "ابانوب هاني": "01284705773",
+    "جوفاني هاني": "01287597237",
+    "ابرام ياسر": "01278793264",
+    "جورج وجيه": "01204715400",
+    "توني ريمون": "01220800188",
+    "مينا هاني (بخيت)": "01276060326",
+    "جرجس نبيل": "01223624989",
+    "جورج شريف": "01122701955",
+    "كيرلس ماجد": "01227547039",
+    "استيفن منير": "01274014019",
+    "جوسيان جرجس": "01220294180",
+    "مينا ميلاد": "01276059466",
+    "نوفير مايكل": "01275882859",
+    "ماريو وائل": "01020462906",
+    "اندرو صفوت واصف قزمان": "01287559288",
+    "أنطون طارق": "01279826512",
+    "توماس اشرف": "01224397257",
+    "جوناثان ممدوح لبيب": "01212167401",
+    "سبستيان ممدوح فتحي عزمي": "01206193106",
+    "كيرلس اسامة حنا": "01270543922",
+    "يوسف عادل عريان": "01278245193",
+    "يوسف مصباح وليم حنا": "01271324533",
+    "ماريو ممدوح": "01272595973",
+    "انطونيوس سمرعزيز": "01289887538",
+    "بافلى جورج": "01210974334",
+    "توني سعيد جابر": "01226829955",
+    "دانيال يوسف": "01275079109",
+    "فيلوباتير خلف منقريوس": "01221743554",
+    "كيرلس ميالد يوسف فهيم": "01155545767",
+    "كيرلس نادي": "01276314822",
+    "مارك هاني": "01227435884",
+    "مينا جرجس حليم": "01055454404",
+    "ابانوب ايليا ملك": "01096682909",
+    "ابانوب داود بخيت": "01040749854",
+    "بولا ميالد عوض الله": "01223064403",
+    "كيرلس فليب فوزي": "01283999238",
+    "ماركو عاطف": "01557000318",
+    "مارك ايهاب صلاح": "1205495040",
+    "مرقص معوض مرقص": "01274469314",
+    "نوفير جورج طانيوس داود": "01275827197",
+    "نوفير باسلي": "",
+    "مينا ايهاب عطالله عطية": "1211593635"
+};
+
 const buildExactCurrentRoster = (existingItems) => {
     const existing = Array.isArray(existingItems) ? existingItems : [];
     const byName = new Map();
@@ -238,6 +299,7 @@ const buildExactCurrentRoster = (existingItems) => {
                     name: canonicalName,
                     ...(grade ? { grade } : {}),
                     previousYearsPoints: Number(LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY[normalizeRosterStudentName(canonicalName)] ?? 0) || 0,
+                    phone: ROSTER_PHONE_BY_KEY[normalizeRosterStudentName(canonicalName)] ?? existingStudent.phone ?? '',
                     points: 0,
                     lastAttended: null,
                     attendanceHistory: [],
@@ -251,6 +313,7 @@ const buildExactCurrentRoster = (existingItems) => {
                 grade: grade || '',
                 points: 0,
                 previousYearsPoints: Number(LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY[normalizeRosterStudentName(canonicalName)] ?? 0) || 0,
+                phone: ROSTER_PHONE_BY_KEY[normalizeRosterStudentName(canonicalName)] ?? '',
                 lastAttended: null,
                 attendanceHistory: [],
             };
@@ -1442,7 +1505,7 @@ const App = () => {
                 const dbItems = docSnap.data()?.items;
                 if (Array.isArray(dbItems)) {
                     const approvedItems = filterToApprovedRoster(dbItems);
-                    const migrationKey = 'church_attendance_roster_migration_2026_09_19_84_v3';
+                    const migrationKey = 'church_attendance_roster_migration_2026_09_19_84_v4';
                     const migrationDone = localStorage.getItem(migrationKey) === 'done';
                     const storedMigrationVersion = docSnap.data()?.rosterMigrationVersion || '';
                     const normalizedDbRoster = dbItems.map(s => normalizeRosterStudentName(s?.name)).filter(Boolean);
