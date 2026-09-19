@@ -1785,13 +1785,10 @@ const App = () => {
     const handleExportData = () => {
         const data = {
             students: students,
+            ...(loggedInAdmin?.isSuperAdmin ? { admins } : {}),
             timestamp: new Date().toISOString(),
             version: 'v8'
         };
-
-        if (loggedInAdmin?.isSuperAdmin) {
-            data.admins = admins;
-        }
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
