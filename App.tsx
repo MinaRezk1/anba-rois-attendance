@@ -39,6 +39,20 @@ const getCairoDateKey = (date = new Date()) => {
 
 const getCairoMonthPrefix = (date = new Date()) => getCairoDateKey(date).slice(0, 7);
 
+const isEarlyBadgeEligibleAt = (date = new Date()) => {
+    const parts = getCairoDateParts(date);
+    return parts.weekday === 'Fri' && !isFirstFridayDateKey(getCairoDateKey(date)) &&
+        parts.hour === 15 && parts.minute >= 0 && parts.minute < 15;
+};
+
+const isEarlyBadgeRecord = (record) => {
+    if (!record || record.type !== 'early') return false;
+    if (record.meta === 'early_badge_eligible') return true;
+    if (!record.recordedAt) return false;
+    const recordedAt = new Date(record.recordedAt);
+    return !Number.isNaN(recordedAt.getTime()) && isEarlyBadgeEligibleAt(recordedAt);
+};
+
 const getCairoMonthPrefixOffset = (offset, date = new Date()) => {
     const parts = getCairoDateParts(date);
     const shifted = new Date(Date.UTC(parts.year, parts.month - 1 + offset, 1, 12, 0, 0));
@@ -111,11 +125,11 @@ const BADGES_CONFIG = [
         color: 'from-amber-400 to-yellow-600',
         check: (history, points, monthPrefix) => {
             const prefix = monthPrefix || getCurrentMonthPrefix();
-            return (history || []).filter(h => h.date && h.date.startsWith(prefix) && h.type === 'early').length >= 3;
+            return (history || []).filter(h => h.date && h.date.startsWith(prefix) && isEarlyBadgeRecord(h)).length >= 3;
         },
         getProgress: (history, points, monthPrefix) => {
             const prefix = monthPrefix || getCurrentMonthPrefix();
-            const count = (history || []).filter(h => h.date && h.date.startsWith(prefix) && h.type === 'early').length;
+            const count = (history || []).filter(h => h.date && h.date.startsWith(prefix) && isEarlyBadgeRecord(h)).length;
             return `${count}/3`;
         }
     },
@@ -1501,6 +1515,8 @@ const App = () => {
                 exchange: 'تبديل النقاط'
             };
 
+            const attendanceRecordedAt = new Date();
+            const earlyBadgeEligible = type === 'early' && dateToRecord === getCairoDateKey(attendanceRecordedAt) && isEarlyBadgeEligibleAt(attendanceRecordedAt);
             const newRecord = {
                 id: generateId(),
                 date: dateToRecord,
@@ -1509,6 +1525,8 @@ const App = () => {
                 typeName: typeNameMap[type] || 'نشاط',
                 description: description && description.trim() ? description.trim() : null,
                 recordedBy: loggedInAdmin.name,
+                recordedAt: attendanceRecordedAt.toISOString(),
+                ...(earlyBadgeEligible ? { meta: 'early_badge_eligible' } : {}),
             };
 
             student.points = (student.points || 0) + points;
@@ -1976,11 +1994,11 @@ const App = () => {
                     categoryLabel: 'أوسمة شهرية (بطل الشهر)',
                     periodLabel: getArabicMonthName(currentMonthPrefix),
                     monthPrefix: currentMonthPrefix,
-                    description: 'حقق جميع متطلبات أوسمة الشهر الحالي (حضور مبكر 3+، قداس شهري 1+، مشاركة 25+ نقطة)',
+                    description: 'حقق جميع متطلبات أوسمة الشهر الحالي (حضور 3:00–3:15 م ثلاث مرات، قداس شهري 1+، مشاركة 25+ نقطة)',
                     progress: '3/3 أوسمة مكتملة',
                     isAwarded: !!currentMonthAwardRecord,
                     awardedRecord: currentMonthAwardRecord,
-                    suggestedPoints: 15,
+                    suggestedPoints: 10,
                     color: 'from-amber-400 to-yellow-500'
                 });
             }
@@ -2005,14 +2023,57 @@ const App = () => {
                     categoryLabel: 'أوسمة شهرية (الشهر السابق)',
                     periodLabel: getArabicMonthName(prevMonthPrefix),
                     monthPrefix: prevMonthPrefix,
-                    description: 'حقق جميع متطلبات أوسمة الشهر السابق كاملة',
+                    description: 'حقق جميع متطلبات أوسمة الشهر السابق كاملة، بما فيها 3 مرات حضور بين 3:00 و3:15 م',
                     progress: '3/3 أوسمة مكتملة',
                     isAwarded: !!prevMonthAwardRecord,
                     awardedRecord: prevMonthAwardRecord,
-                    suggestedPoints: 15,
+                    suggestedPoints: 10,
                     color: 'from-yellow-500 to-amber-600'
                 });
             }
+
+            // 3. Monthly leaderboard rewards for the previous month (manual notification only)
+            const prevMonthRanking = [...students]
+                .map(candidate => {
+                    const prevPoints = (candidate.attendanceHistory || [])
+                        .filter(h => h.date && h.date.startsWith(prevMonthPrefix))
+                        .filter(h => h.typeName !== 'مكافأة لوحة الصدارة' && !(h.meta && h.meta.startsWith('leaderboard_reward_')))
+                        .reduce((sum, h) => sum + Number(h.points || 0), 0);
+                    return { candidate, prevPoints };
+                })
+                .filter(item => item.prevPoints > 0)
+                .sort((a, b) => b.prevPoints - a.prevPoints || a.candidate.name.localeCompare(b.candidate.name, 'ar'))
+                .slice(0, 3);
+
+            prevMonthRanking.forEach((item, index) => {
+                const rank = index + 1;
+                const rankTitles = ['المركز الأول', 'المركز الثاني', 'المركز الثالث'];
+                const rankPoints = [20, 15, 10];
+                const rankEmojis = ['🥇', '🥈', '🥉'];
+                const candidate = item.candidate;
+                const awardMeta = `leaderboard_reward_${prevMonthPrefix}_rank_${rank}`;
+                const awardRecord = (candidate.attendanceHistory || []).find(h => h.meta === awardMeta);
+
+                alerts.push({
+                    id: `leaderboard_${prevMonthPrefix}_rank_${rank}_${candidate.id}`,
+                    studentId: candidate.id,
+                    studentName: candidate.name,
+                    student: candidate,
+                    badgeId: `leaderboard_rank_${rank}`,
+                    badgeTitle: `${rankEmojis[index]} ${rankTitles[index]} في الشهر`,
+                    badgeEmoji: rankEmojis[index],
+                    category: 'monthly',
+                    categoryLabel: 'مكافآت ترتيب الشهر',
+                    periodLabel: getArabicMonthName(prevMonthPrefix),
+                    monthPrefix: prevMonthPrefix,
+                    description: `أنهى الشهر في ${rankTitles[index]} برصيد ${item.prevPoints} نقطة قبل مكافآت ترتيب الشهر.`,
+                    progress: `${item.prevPoints} نقطة`,
+                    isAwarded: !!awardRecord,
+                    awardedRecord: awardRecord,
+                    suggestedPoints: rankPoints[index],
+                    color: index === 0 ? 'from-amber-400 to-yellow-500' : index === 1 ? 'from-slate-300 to-slate-500' : 'from-orange-400 to-amber-700'
+                });
+            });
 
             // 3. Cumulative / Milestone Badges (أوسمة تراكمية وموسمية)
             BADGES_CONFIG.filter(b => b.category === 'cumulative').forEach(badge => {
@@ -2113,7 +2174,9 @@ const App = () => {
         const targetStudent = students.find(s => s.id === alertItem.studentId);
         if (!targetStudent) return;
 
-        const targetMeta = `badge_reward_${alertItem.id}`;
+        const targetMeta = alertItem.badgeId?.startsWith('leaderboard_rank_')
+            ? `leaderboard_reward_${alertItem.monthPrefix}_rank_${alertItem.badgeId.replace('leaderboard_rank_', '')}`
+            : `badge_reward_${alertItem.id}`;
         if ((targetStudent.attendanceHistory || []).some(h => h.meta === targetMeta)) {
             showToast('تم منح مكافأة هذا الوسام بالفعل.');
             return;
@@ -2269,7 +2332,7 @@ const App = () => {
             typeName: 'مكافأة لوحة الصدارة',
             description: rewardCustomDesc || `مكافأة ${rewardRankTitle}`,
             recordedBy: loggedInAdmin.name,
-            meta: `manual_champion_${generateId()}`
+            meta: `leaderboard_reward_${rewardTargetMonth === 'prev' ? getCairoMonthPrefixOffset(-1) : getCairoMonthPrefix()}_rank_${rewardRankTitle === 'المركز الأول' ? 1 : rewardRankTitle === 'المركز الثاني' ? 2 : 3}`
         };
 
         const updatedStudents = students.map(s => {
