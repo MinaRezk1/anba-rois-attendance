@@ -1,0 +1,10 @@
+{
+  "name": "Points ثانوي بنين",
+  "description": "تطبيق لتسجيل حضور وغياب ونقاط اجتماع ثانوي بنين - كنيسة الأنبا رويس والشهيد مارمينا.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f0c29" />
+      <stop offset="50%" stop-color="#1e1b4b" />
+      <stop offset="100%" stop-color="#2e1065" />
+    </linearGradient>
+
+    <!-- Metallic Gold Gradient -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="30%" stop-color="#f59e0b" />
+      <stop offset="70%" stop-color="#d97706" />
+      <stop offset="100%" stop-color="#b45309" />
+    </linearGradient>
+
+    <!-- Glowing Aura Gradient -->
+    <radialGradient id="aura" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#fef08a" stop-opacity="0.35" />
+      <stop offset="50%" stop-color="#f59e0b" stop-opacity="0.1" />
+      <stop offset="100%" stop-color="#1e1b4b" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Soft Glow Filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="512" height="512" rx="120" fill="url(#bgGrad)" />
+  
+  <!-- Outer Gold Frame -->
+  <rect x="18" y="18" width="476" height="476" rx="102" fill="none" stroke="url(#goldGrad)" stroke-width="6" filter="url(#glow)" />
+  <rect x="28" y="28" width="456" height="456" rx="92" fill="none" stroke="#ffffff" stroke-width="1.5" opacity="0.15" />
+
+  <!-- Spiritual Glow behind the Saint -->
+  <circle cx="256" cy="210" r="180" fill="url(#aura)" />
+
+  <!-- SAINT ANBA REWEISS (الأنبا رويس) ILLUSTRATION -->
+  <g transform="translate(256, 210)">
+    
+    <!-- 1. The Golden Halo (الهالة المقدسة) -->
+    <circle cx="0" cy="-30" r="85" fill="none" stroke="url(#goldGrad)" stroke-width="10" filter="url(#glow)" />
+    <circle cx="0" cy="-30" r="75" fill="none" stroke="#fef08a" stroke-width="2" opacity="0.8" />
+    <!-- Small halo crosses -->
+    <path d="M-5,-105 L5,-105 M0,-110 L0,-100" stroke="url(#goldGrad)" stroke-width="3" stroke-linecap="round" />
+    <path d="M-80,-35 L-70,-35 M-75,-40 L-75,-30" stroke="url(#goldGrad)" stroke-width="3" stroke-linecap="round" />
+    <path d="M70,-35 L80,-35 M75,-40 L75,-30" stroke="url(#goldGrad)" stroke-width="3" stroke-linecap="round" />
+
+    <!-- 2. Companion Camel Silhouette (الجمال رفيق القديس - يرمز للبساطة والزهد) -->
+    <!-- Positioned elegantly in the background/side -->
+    <g transform="translate(-110, 40) scale(0.65)" opacity="0.45">
+      <!-- Camel shape -->
+      <path d="M -30,40 C -30,20 -15,10 -10,0 C -5,-10 -5,-30 0,-40 C 5,-50 15,-55 20,-45 C 25,-35 20,-20 15,-10 C 25,-5 35,5 45,15 C 55,25 70,30 75,45 C 78,55 65,65 55,75 L 50,110 L 40,110 L 41,80 L 15,80 L 12,110 L 2,110 L 8,75 L -10,75 L -13,110 L -23,110 L -18,70 C -25,70 -30,60 -30,40 Z" fill="url(#goldGrad)" />
+    </g>
+
+    <!-- 3. Traditional Coptic Cross on the Right (صليب قبطي) -->
+    <g transform="translate(110, 50) scale(0.7)">
+      <!-- Cross vertical -->
+      <rect x="-8" y="-45" width="16" height="90" rx="4" fill="url(#goldGrad)" />
+      <!-- Cross horizontal -->
+      <rect x="-35" y="-12" width="70" height="16" rx="4" fill="url(#goldGrad)" />
+      <!-- Circle behind center -->
+      <circle cx="0" cy="-4" r="18" fill="none" stroke="url(#goldGrad)" stroke-width="5" />
+      <!-- Small decorative circles at ends -->
+      <circle cx="0" cy="-51" r="5" fill="url(#goldGrad)" />
+      <circle cx="0" cy="51" r="5" fill="url(#goldGrad)" />
+      <circle cx="-41" cy="-4" r="5" fill="url(#goldGrad)" />
+      <circle cx="41" cy="-4" r="5" fill="url(#goldGrad)" />
+    </g>
+
+    <!-- 4. The Saint's Silhouette & Ascetic Robes (جسد القديس والملابس) -->
+    <!-- Cloak / Robe -->
+    <path d="M-85,120 C-85,50 -50,20 -30,10 L30,10 C50,20 85,50 85,120 Z" fill="#1e153a" stroke="url(#goldGrad)" stroke-width="2" />
+    
+    <!-- Monk's Hood / Qlansuwa (القلنسوة الرهبانية المخططة بـ 12 نجمة وصليب) -->
+    <path d="M-40,-35 C-40,-85 -25,-90 0,-90 C25,-90 40,-85 40,-35 C40,-15 30,15 30,25 L-30,25 C-30,15 -40,-15 -40,-35 Z" fill="#110c24" />
+    <!-- Qlansuwa center seam and small golden stars/crosses -->
+    <line x1="0" y1="-90" x2="0" y2="25" stroke="url(#goldGrad)" stroke-width="2" stroke-dasharray="2,6" />
+    <circle cx="-18" cy="-55" r="2" fill="#fbbf24" />
+    <circle cx="18" cy="-55" r="2" fill="#fbbf24" />
+    <circle cx="-20" cy="-35" r="2" fill="#fbbf24" />
+    <circle cx="20" cy="-35" r="2" fill="#fbbf24" />
+    <circle cx="-15" cy="-15" r="2" fill="#fbbf24" />
+    <circle cx="15" cy="-15" r="2" fill="#fbbf24" />
+    <!-- Cross on the hood -->
+    <path d="M-4,-75 L4,-75 M0,-79 L0,-71" stroke="url(#goldGrad)" stroke-width="2" />
+
+    <!-- 5. Stylized Ascetic Face & Flowing White Beard (اللحية البيضاء الرمزية) -->
+    <!-- Minimalist face outline -->
+    <path d="M-22,-35 C-22,-45 -15,-48 0,-48 C15,-48 22,-45 22,-35 C22,-20 18,-10 0,-10 C-18,-10 -22,-20 -22,-35 Z" fill="#fdf2e9" />
+    <!-- Ascetic Beard -->
+    <path d="M-22,-20 C-22,30 -15,75 0,85 C15,75 22,30 22,-20 C18,-12 12,-8 0,-8 C-12,-8 -18,-12 -22,-20 Z" fill="#f1f5f9" />
+    <!-- Beard lines -->
+    <path d="M-12,15 C-12,45 -5,65 0,72 C5,65 12,45 12,15" fill="none" stroke="#cbd5e1" stroke-width="1.5" stroke-linecap="round" />
+    <path d="M-6,25 C-6,50 -2,60 0,66 C2,50 6,25 6,25" fill="none" stroke="#e2e8f0" stroke-width="1" />
+
+    <!-- 6. Hand holding a Glowing Golden Cross (صليب البركة) -->
+    <g transform="translate(0, 35)">
+      <!-- Saint's hand sleeve -->
+      <path d="M-15,10 C-15,0 -5,-15 5,-15 C15,-15 18,0 18,10 Z" fill="#1e153a" />
+      <!-- Hand -->
+      <circle cx="1" cy="-12" r="9" fill="#fdf2e9" />
+      <!-- Golden Cross -->
+      <path d="M-11,-24 L13,-24 M1,-34 L1,-10" stroke="url(#goldGrad)" stroke-width="4.5" stroke-linecap="round" filter="url(#glow)" />
+      <path d="M-11,-24 L13,-24 M1,-34 L1,-10" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" />
+    </g>
+
+  </g>
+
+  <!-- TYPOGRAPHY / APP TITLE AT THE BOTTOM (الاسم في الأسفل) -->
+  <!-- "Points" with elegant modern tech styling, and "ثانوي بنين" underneath in fine Cairo-like geometric style -->
+  <g transform="translate(256, 435)">
+    <!-- Main modern bold label: Points -->
+    <text x="0" y="-12" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="34" fill="url(#goldGrad)" text-anchor="middle" letter-spacing="4" filter="url(#glow)">POINTS</text>
+    <text x="0" y="-12" font-family="'Cairo', 'Inter', sans-serif" font-weight="900" font-size="34" fill="#ffffff" text-anchor="middle" letter-spacing="4">POINTS</text>
+    
+    <!-- Secondary Arabic label: الأنبا رويس - ثانوي بنين -->
+    <rect x="-130" y="8" width="260" height="28" rx="14" fill="#110c24" opacity="0.6" stroke="url(#goldGrad)" stroke-width="1.5" />
+    <text x="0" y="27" font-family="'Cairo', sans-serif" font-weight="700" font-size="14" fill="#fef08a" text-anchor="middle">الأنبا رويس - ثانوي بنين</text>
+  </g>
+
+</svg>
