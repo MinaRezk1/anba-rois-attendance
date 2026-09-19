@@ -233,7 +233,7 @@ const SECOND_SECONDARY_ROSTER_NAMES = [
     "بافلي جورج","توني سعيد جابر","دانيال يوسف","فيلوباتير خلف منقريوس","كيرلس ميالد يوسف فهيم",
     "كيرلس نادي","مارك هاني","مينا جرجس حليم","ابانوب ايليا ملك","ابانوب داود بخيت",
     "بولا ميالد عوض الله","بولا ميالد عوض اللة","كيرلس فليب فوزي","ماركو عاطف","مارك ايهاب صلاح",
-    "مرقص معوض مرقص","نوفير جورج طانيوس داود","نوفير باسلي","مينا ايهاب عطالله عطية"
+    "مرقص معوض مرقص","نوفير جورج طانيوس داود","نوفير باسلي","مينا ايهاب عطالله عطية","مينا ميلاد","مينا ميالد"
 ];
 
 const THIRD_SECONDARY_ROSTER_NAMES = [
@@ -241,7 +241,7 @@ const THIRD_SECONDARY_ROSTER_NAMES = [
     "ديفيد هاني","نوفير ماجد","بيتر عماد","بافلي سمير","كيرلس وجدي","جوفاني مايكل","ديفيد سامح",
     "فيلوباتير امجد","فادي ايهاب","مكاريوس عاطف","ابانوب هاني","جوفاني هاني","ابرام ياسر",
     "جورج وجيه","توني ريمون","مينا هاني (بخيت)","مينا هاني بخيت","جرجس نبيل","جورج شريف",
-    "كيرلس ماجد","استيفن منير","جوسيان جرجس","مينا ميلاد","مينا ميالد","نوفير مايكل","ماريو وائل"
+    "كيرلس ماجد","استيفن منير","جوسيان جرجس","نوفير مايكل","ماريو وائل"
 ];
 
 const ROSTER_GRADE_BY_KEY = new Map<string, string>([
@@ -252,9 +252,8 @@ const ROSTER_GRADE_BY_KEY = new Map<string, string>([
 
 const getRosterGrade = (name) => ROSTER_GRADE_BY_KEY.get(normalizeRosterStudentName(name)) || '';
 
-const filterToApprovedRoster = (items) => Array.isArray(items) ? items
-    .filter(isApprovedRosterStudent)
-    .map(student => {
+const filterToApprovedRoster = (items) => Array.isArray(items)
+    ? items.map(student => {
         const correctedName = normalizeRosterStudentName(student.name) === normalizeRosterStudentName('مينا ميالد')
             ? 'مينا ميلاد'
             : student.name;
@@ -264,7 +263,8 @@ const filterToApprovedRoster = (items) => Array.isArray(items) ? items
             name: correctedName,
             ...(rosterGrade ? { grade: rosterGrade } : {}),
         };
-    }) : [];
+    })
+    : [];
 
 // --- Badges & Milestones Config ---
 const getCurrentMonthPrefix = () => getCairoMonthPrefix();
