@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.8';
+const APP_VERSION = '2026.09.19.9';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -3017,8 +3017,12 @@ const App = () => {
                                                     <div className="text-[9px] text-sky-300/90 font-bold text-center mt-1 whitespace-nowrap">
                                                         نقاط السنين السابقة: {student.previousYearsPoints || 0}
                                                     </div>
-                                                    <div className="text-[10px] text-emerald-300 font-black text-center mt-0.5 whitespace-nowrap">
-                                                        إجمالي النقاط (السابق + الحالي): {getStudentTotalPoints(student)}
+                                                    <div className="mt-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-400/25 text-center whitespace-nowrap">
+                                                        <div className="text-[8px] text-emerald-300/80 font-bold leading-none">TOTAL POINTS</div>
+                                                        <div className="text-sm text-emerald-300 font-black leading-tight">
+                                                            {getStudentTotalPoints(student)}
+                                                        </div>
+                                                        <div className="text-[8px] text-emerald-200/70 font-semibold leading-none">السابق + الحالي</div>
                                                     </div>
                                                 </div>
                                                 <span className="text-lg font-semibold flex items-center gap-2 flex-wrap">
