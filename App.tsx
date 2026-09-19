@@ -2,37 +2,14 @@ import React from 'react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './index.css';
 import { db } from './firebase';
-import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 
 
 
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
-const compressProductImage = (file) => new Promise((resolve, reject) => {
-    if (!file || !file.type.startsWith('image/')) return reject(new Error('Invalid image'));
-    const reader = new FileReader();
-    reader.onload = () => {
-        const img = new Image();
-        img.onload = () => {
-            const maxSize = 700;
-            const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.max(1, Math.round(img.width * scale));
-            canvas.height = Math.max(1, Math.round(img.height * scale));
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return reject(new Error('Canvas unavailable'));
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            resolve(canvas.toDataURL('image/jpeg', 0.78));
-        };
-        img.onerror = () => reject(new Error('Image read failed'));
-        img.src = String(reader.result || '');
-    };
-    reader.onerror = () => reject(new Error('File read failed'));
-    reader.readAsDataURL(file);
-});
-
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.8';
+const APP_VERSION = '2026.09.19.9';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -1459,21 +1436,6 @@ const App = () => {
     const [isIOSDevice, setIsIOSDevice] = useState(false);
     const [showIOSInstallGuide, setShowIOSInstallGuide] = useState(false);
 
-    // Reward Store
-    const [storeProducts, setStoreProducts] = useState([]);
-    const [storeOrders, setStoreOrders] = useState([]);
-    const [storeLoaded, setStoreLoaded] = useState(false);
-    const [storeProductModalOpen, setStoreProductModalOpen] = useState(false);
-    const [editingStoreProductId, setEditingStoreProductId] = useState(null);
-    const [storeProductName, setStoreProductName] = useState('');
-    const [storeProductSize, setStoreProductSize] = useState('');
-    const [storeProductQuantity, setStoreProductQuantity] = useState('1');
-    const [storeProductPoints, setStoreProductPoints] = useState('10');
-    const [storeProductImage, setStoreProductImage] = useState('');
-    const [storeSelectedStudentId, setStoreSelectedStudentId] = useState('');
-    const [storePurchaseQuantity, setStorePurchaseQuantity] = useState('1');
-    const [storeSearch, setStoreSearch] = useState('');
-
     useEffect(() => {
         const refreshClientForNewVersion = async () => {
             const storedVersion = localStorage.getItem('church_attendance_app_version');
@@ -1566,20 +1528,6 @@ const App = () => {
     const lastStudentsDB = useRef<string>(localStorage.getItem('church_attendance_students_v8') || '[]');
     const lastAdminsDB = useRef<string>(localStorage.getItem('church_attendance_admins_v8') || '[]');
     const isRosterMigrationInProgress = useRef(false);
-
-    // Reward Store data
-    useEffect(() => {
-        const unsubStore = onSnapshot(doc(db, 'appData', 'reward_store_v1'), (snap) => {
-            const data = snap.exists() ? snap.data() : {};
-            setStoreProducts(Array.isArray(data.products) ? data.products : []);
-            setStoreOrders(Array.isArray(data.orders) ? data.orders : []);
-            setStoreLoaded(true);
-        }, (err) => {
-            console.error('Error loading reward store:', err);
-            setStoreLoaded(true);
-        });
-        return () => unsubStore();
-    }, []);
 
     // Initialize Data from Firebase with Offline-Resilient Merging
     useEffect(() => {
@@ -2235,88 +2183,6 @@ const App = () => {
         setEditingAdminId(null);
         setEditingAdminPinValue('');
     };
-
-    const resetStoreProductForm = useCallback(() => {
-        setEditingStoreProductId(null); setStoreProductName(''); setStoreProductSize('');
-        setStoreProductQuantity('1'); setStoreProductPoints('10'); setStoreProductImage('');
-    }, []);
-
-    const handleStoreImageChange = async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        try { setStoreProductImage(await compressProductImage(file)); }
-        catch (err) { console.error(err); showToast('تعذر تجهيز صورة المنتج.'); }
-        e.currentTarget.value = '';
-    };
-
-    const handleSaveStoreProduct = async () => {
-        if (!loggedInAdmin) return;
-        const name = storeProductName.trim(), size = storeProductSize.trim();
-        const quantity = Math.floor(Number(storeProductQuantity)), points = Math.floor(Number(storeProductPoints));
-        if (!name || !size || !Number.isFinite(quantity) || quantity < 0 || !Number.isFinite(points) || points <= 0) {
-            showToast('اكتب اسم الهدية والمقاس والعدد وسعر النقاط بشكل صحيح.'); return;
-        }
-        const nextProduct = { id: editingStoreProductId || generateId(), name, size, quantity, points, image: storeProductImage || '', active: true, updatedAt: new Date().toISOString(), updatedBy: loggedInAdmin.name };
-        const nextProducts = editingStoreProductId ? storeProducts.map(p => p.id === editingStoreProductId ? { ...p, ...nextProduct } : p) : [nextProduct, ...storeProducts];
-        try {
-            await setDoc(doc(db, 'appData', 'reward_store_v1'), { products: nextProducts, orders: storeOrders }, { merge: true });
-            setStoreProducts(nextProducts); resetStoreProductForm(); setStoreProductModalOpen(false);
-            showToast(editingStoreProductId ? 'تم تعديل الهدية بنجاح.' : 'تمت إضافة الهدية للمتجر.');
-        } catch (err) { console.error(err); showToast('حصل خطأ أثناء حفظ الهدية.'); }
-    };
-
-    const handleEditStoreProduct = (product) => {
-        setEditingStoreProductId(product.id); setStoreProductName(product.name || ''); setStoreProductSize(product.size || '');
-        setStoreProductQuantity(String(product.quantity ?? 0)); setStoreProductPoints(String(product.points ?? 0));
-        setStoreProductImage(product.image || ''); setStoreProductModalOpen(true);
-    };
-
-    const handleDeleteStoreProduct = async (productId) => {
-        if (!loggedInAdmin || !window.confirm('هل تريد حذف هذه الهدية من المتجر؟')) return;
-        const nextProducts = storeProducts.filter(p => p.id !== productId);
-        try {
-            await setDoc(doc(db, 'appData', 'reward_store_v1'), { products: nextProducts, orders: storeOrders }, { merge: true });
-            setStoreProducts(nextProducts); showToast('تم حذف الهدية.');
-        } catch (err) { console.error(err); showToast('حصل خطأ أثناء حذف الهدية.'); }
-    };
-
-    const handlePurchaseStoreProduct = async (product) => {
-        const studentId = storeSelectedStudentId, qty = Math.floor(Number(storePurchaseQuantity));
-        if (!studentId || !Number.isFinite(qty) || qty <= 0) { showToast('اختار اسمك وعدد القطع المطلوب.'); return; }
-        const totalCost = qty * Number(product.points || 0);
-        try {
-            const studentRef = doc(db, 'appData', 'students_v8'), storeRef = doc(db, 'appData', 'reward_store_v1');
-            let result = null;
-            await runTransaction(db, async (transaction) => {
-                const studentSnap = await transaction.get(studentRef), storeSnap = await transaction.get(storeRef);
-                const dbStudents = Array.isArray(studentSnap.data()?.items) ? studentSnap.data().items : [];
-                const storeData = storeSnap.exists() ? storeSnap.data() : {};
-                const products = Array.isArray(storeData.products) ? storeData.products : [];
-                const orders = Array.isArray(storeData.orders) ? storeData.orders : [];
-                const dbStudent = dbStudents.find(s => s.id === studentId), dbProduct = products.find(p => p.id === product.id && p.active !== false);
-                if (!dbStudent || !dbProduct) throw new Error('المنتج أو الطالب غير متاح.');
-                const dbQty = Number(dbProduct.quantity || 0), dbPoints = Number(dbStudent.points || 0);
-                if (qty > dbQty) throw new Error('الكمية المطلوبة غير متاحة.');
-                if (dbPoints < totalCost) throw new Error('النقاط الحالية غير كافية.');
-                const order = { id: generateId(), productId: dbProduct.id, productName: dbProduct.name, size: dbProduct.size, quantity: qty, pointsPerUnit: Number(dbProduct.points || 0), totalPoints: totalCost, studentId, studentName: dbStudent.name, createdAt: new Date().toISOString(), status: 'pending' };
-                const updatedStudents = dbStudents.map(s => s.id === studentId ? { ...s, points: dbPoints - totalCost } : s);
-                const updatedProducts = products.map(p => p.id === dbProduct.id ? { ...p, quantity: dbQty - qty } : p);
-                transaction.set(studentRef, { items: updatedStudents }, { merge: true });
-                transaction.set(storeRef, { products: updatedProducts, orders: [order, ...orders] }, { merge: true });
-                result = { updatedStudents, updatedProducts, order };
-            });
-            if (result) {
-                setStudents(result.updatedStudents); setStoreProducts(result.updatedProducts); setStoreOrders(prev => [result.order, ...prev]);
-                setStoreSelectedStudentId(''); setStorePurchaseQuantity('1');
-                showToast(`🎁 تم شراء ${product.name} مقابل ${result.order.totalPoints} نقطة.`);
-            }
-        } catch (err) { console.error('Store purchase error:', err); showToast(err?.message || 'تعذر إتمام عملية الشراء.'); }
-    };
-
-    const filteredStoreProducts = useMemo(() => {
-        const term = storeSearch.trim().toLowerCase();
-        return storeProducts.filter(product => product.active !== false && (!term || String(product.name || '').toLowerCase().includes(term) || String(product.size || '').toLowerCase().includes(term)));
-    }, [storeProducts, storeSearch]);
 
     // --- Export / Import ---
     const handleExportData = () => {
@@ -3143,48 +3009,7 @@ const App = () => {
                             <CalendarIcon className="w-5 h-5" />
                             <span className="whitespace-nowrap">سجل الاجتماعات</span>
                         </button>
-                         <button onClick={() => setActiveView('store')} className={`flex-1 min-w-[120px] text-center rounded-lg py-2 font-bold flex items-center justify-center gap-2 transition-colors ${activeView === 'store' ? 'bg-indigo-700 text-amber-400' : 'text-indigo-300 hover:bg-indigo-800/50'}`}>
-                            <span className="text-lg">🎁</span><span className="whitespace-nowrap">متجر الهدايا</span>
-                        </button>
                     </div>
-
-
-                    {activeView === 'store' && (
-                        <div className="space-y-5">
-                            <div className="bg-gradient-to-r from-amber-500/15 via-indigo-900/70 to-indigo-950/80 border border-amber-500/30 rounded-2xl p-5">
-                                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                                    <div><h2 className="text-2xl font-black text-amber-300">🎁 ترابيزة الهدايا</h2><p className="text-sm text-indigo-200 mt-1">بدّل نقاطك بهدايا ومنتجات متاحة حسب المخزون.</p></div>
-                                    {isAuthenticated && <button onClick={() => { resetStoreProductForm(); setStoreProductModalOpen(true); }} className="bg-amber-500 hover:bg-amber-400 text-indigo-950 font-black px-4 py-2.5 rounded-xl">+ إضافة هدية</button>}
-                                </div>
-                                <div className="mt-4 flex flex-col md:flex-row gap-3">
-                                    <input value={storeSearch} onChange={e => setStoreSearch(e.target.value)} placeholder="ابحث عن هدية أو مقاس..." className="flex-1 bg-indigo-950/80 border border-indigo-700 rounded-xl px-4 py-3 text-white outline-none focus:border-amber-400" />
-                                    <select value={storeSelectedStudentId} onChange={e => setStoreSelectedStudentId(e.target.value)} className="md:w-80 bg-indigo-950/80 border border-indigo-700 rounded-xl px-4 py-3 text-white outline-none focus:border-amber-400">
-                                        <option value="">👤 اختار اسمك للشراء</option>{sortedStudents.map(s => <option key={s.id} value={s.id}>{s.name} — {s.points || 0} نقطة</option>)}
-                                    </select>
-                                </div>
-                                {storeSelectedStudentId && <div className="mt-3 text-sm text-emerald-300 font-bold">رصيدك المتاح: {students.find(s => s.id === storeSelectedStudentId)?.points || 0} نقطة</div>}
-                            </div>
-                            {!storeLoaded ? <div className="text-center py-12 text-indigo-300">جاري تحميل الهدايا...</div> :
-                            filteredStoreProducts.length === 0 ? <div className="text-center py-12 bg-indigo-900/50 rounded-2xl border border-indigo-800/50"><div className="text-5xl mb-3">🎁</div><p className="font-bold text-indigo-200">لسه مفيش هدايا مضافة للمتجر.</p></div> :
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">{filteredStoreProducts.map(product => {
-                                const selectedStudent = students.find(s => s.id === storeSelectedStudentId);
-                                const qty = Math.max(1, Number(storePurchaseQuantity || 1));
-                                const totalCost = Number(product.points || 0) * qty;
-                                const canBuy = !!selectedStudent && Number(selectedStudent.points || 0) >= totalCost && Number(product.quantity || 0) >= qty;
-                                return <div key={product.id} className="bg-indigo-900/70 rounded-2xl border border-indigo-800/60 overflow-hidden shadow-lg">
-                                    <div className="aspect-square bg-indigo-950 flex items-center justify-center overflow-hidden">{product.image ? <img src={product.image} alt={product.name} className="w-full h-full object-cover" /> : <span className="text-7xl">🎁</span>}</div>
-                                    <div className="p-4 space-y-3">
-                                        <div><h3 className="text-lg font-black text-white">{product.name}</h3><div className="text-xs text-indigo-300 mt-1">المقاس: <span className="text-white font-bold">{product.size}</span></div></div>
-                                        <div className="flex justify-between items-center"><span className="text-amber-300 font-black">{product.points} نقطة</span><span className={`text-xs font-bold px-2 py-1 rounded-full ${Number(product.quantity || 0) > 0 ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300'}`}>{Number(product.quantity || 0) > 0 ? `متاح: ${product.quantity}` : 'خلص'}</span></div>
-                                        <div className="flex gap-2"><input type="number" min="1" max={Math.max(1, Number(product.quantity || 1))} value={storePurchaseQuantity} onChange={e => setStorePurchaseQuantity(e.target.value)} className="w-20 bg-indigo-950 border border-indigo-700 rounded-lg px-2 py-2 text-center text-white" /><button disabled={!canBuy} onClick={() => handlePurchaseStoreProduct(product)} className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-indigo-800 disabled:text-indigo-500 text-white font-black rounded-lg px-3 py-2">شراء — {totalCost} نقطة</button></div>
-                                        {selectedStudent && Number(selectedStudent.points || 0) < totalCost && <div className="text-xs text-red-300 font-bold">نقاطك الحالية غير كافية.</div>}
-                                        {isAuthenticated && <div className="flex gap-2 pt-2 border-t border-indigo-800"><button onClick={() => handleEditStoreProduct(product)} className="flex-1 text-sky-300 text-sm font-bold py-1.5">✏️ تعديل</button><button onClick={() => handleDeleteStoreProduct(product.id)} className="flex-1 text-red-300 text-sm font-bold py-1.5">🗑️ حذف</button></div>}
-                                    </div>
-                                </div>;
-                            })}</div>}
-                            {isAuthenticated && storeOrders.length > 0 && <div className="bg-indigo-900/60 rounded-2xl border border-indigo-800/50 p-4"><h3 className="font-black text-amber-300 mb-3">📦 طلبات الهدايا</h3><div className="space-y-2 max-h-80 overflow-y-auto">{storeOrders.slice(0,50).map(order => <div key={order.id} className="bg-indigo-950/60 rounded-xl p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2"><div><div className="font-bold">{order.studentName} — {order.productName}</div><div className="text-xs text-indigo-300">مقاس {order.size} · عدد {order.quantity} · {order.totalPoints} نقطة</div></div><span className="text-xs font-bold text-amber-300">⏳ في انتظار التسليم</span></div>)}</div></div>}
-                        </div>
-                    )}
 
                     {activeView === 'students' && (
                         <div>
@@ -3232,12 +3057,12 @@ const App = () => {
                                                             ✏️ تعديل السنين السابقة
                                                         </button>
                                                     )}
-                                                    <div className="mt-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-400/25 text-center whitespace-nowrap">
-                                                        <div className="text-[8px] text-emerald-300/80 font-bold leading-none">Total Points</div>
-                                                        <div className="text-base text-emerald-300 font-black leading-tight">
+                                                    <div className="mt-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-400/30 text-center whitespace-nowrap">
+                                                        <div className="text-[9px] text-emerald-200 font-black leading-none">TOTAL POINTS</div>
+                                                        <div className="text-lg text-emerald-300 font-black leading-tight">
                                                             {getStudentTotalPoints(student)}
                                                         </div>
-                                                        <div className="text-[8px] text-emerald-200/70 font-semibold leading-none">السنين السابقة + السنة الحالية</div>
+                                                        <div className="text-[8px] text-emerald-200/70 font-semibold leading-none">السابق + الحالي</div>
                                                     </div>
                                                 </div>
                                                 <span className="text-lg font-semibold flex items-center gap-2 flex-wrap">
@@ -4417,18 +4242,7 @@ const App = () => {
                 )}
             </Modal>
             
- 
-            <Modal isOpen={storeProductModalOpen && isAuthenticated} onClose={() => { setStoreProductModalOpen(false); resetStoreProductForm(); }} title={editingStoreProductId ? 'تعديل الهدية' : 'إضافة هدية جديدة'}>
-                <div className="space-y-4">
-                    <input value={storeProductName} onChange={e => setStoreProductName(e.target.value)} placeholder="اسم المنتج / الهدية" className="w-full bg-indigo-800 text-white border border-indigo-700 rounded-lg px-4 py-2.5" />
-                    <div className="grid grid-cols-2 gap-3"><input value={storeProductSize} onChange={e => setStoreProductSize(e.target.value)} placeholder="المقاس" className="bg-indigo-800 text-white border border-indigo-700 rounded-lg px-4 py-2.5" /><input type="number" min="0" value={storeProductQuantity} onChange={e => setStoreProductQuantity(e.target.value)} placeholder="العدد" className="bg-indigo-800 text-white border border-indigo-700 rounded-lg px-4 py-2.5" /></div>
-                    <input type="number" min="1" value={storeProductPoints} onChange={e => setStoreProductPoints(e.target.value)} placeholder="السعر بالنقاط" className="w-full bg-indigo-800 text-white border border-indigo-700 rounded-lg px-4 py-2.5" />
-                    <div><label className="block text-sm text-indigo-300 mb-2">صورة المنتج</label><input type="file" accept="image/*" onChange={handleStoreImageChange} className="w-full text-sm text-indigo-300" />{storeProductImage && <img src={storeProductImage} alt="معاينة المنتج" className="mt-3 w-32 h-32 object-cover rounded-xl border border-indigo-700" />}</div>
-                    <button onClick={handleSaveStoreProduct} className="w-full bg-amber-500 hover:bg-amber-400 text-indigo-950 font-black rounded-xl py-3">{editingStoreProductId ? 'حفظ التعديلات' : 'إضافة الهدية للمتجر'}</button>
-                </div>
-            </Modal>
-
-            <Modal isOpen={isBackupModalOpen} onClose={() => setBackupModalOpen(false)} title="النسخ الاحتياطي والبيانات">
+             <Modal isOpen={isBackupModalOpen} onClose={() => setBackupModalOpen(false)} title="النسخ الاحتياطي والبيانات">
                 <div className="space-y-6 text-center">
                     <p className="text-indigo-300">
                         يمكنك استخدام هذه الأدوات لحفظ بيانات الحضور والنقاط، أو لاستعادتها ومشاهدة الترتيب.
