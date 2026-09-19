@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.11';
+const APP_VERSION = '2026.09.19.12';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
