@@ -1913,7 +1913,7 @@ const App = () => {
                 const prevPoints = (student.attendanceHistory || [])
                     .filter(h => h.date && h.date.startsWith(prevMonthPrefix))
                     .filter(h => h.typeName !== 'مكافأة لوحة الصدارة' && !(h.meta && h.meta.startsWith('leaderboard_reward_')))
-                    .reduce((sum, h) => sum + h.points, 0);
+                    .reduce((sum, h) => sum + Number(h.points || 0), 0);
                 return {
                     ...student,
                     prevPoints
@@ -2140,12 +2140,12 @@ const App = () => {
                     filteredPoints = (student.attendanceHistory || [])
                         .filter(h => h.date && h.date.startsWith(currentMonthPrefix))
                         .filter(h => h.typeName !== 'مكافأة لوحة الصدارة' && !(h.meta && h.meta.startsWith('leaderboard_reward_')))
-                        .reduce((sum, h) => sum + h.points, 0);
+                        .reduce((sum, h) => sum + Number(h.points || 0), 0);
                 } else if (leaderboardFilter === 'prev_month') {
                     filteredPoints = (student.attendanceHistory || [])
                         .filter(h => h.date && h.date.startsWith(prevMonthPrefix))
                         .filter(h => h.typeName !== 'مكافأة لوحة الصدارة' && !(h.meta && h.meta.startsWith('leaderboard_reward_')))
-                        .reduce((sum, h) => sum + h.points, 0);
+                        .reduce((sum, h) => sum + Number(h.points || 0), 0);
                 }
                 
                 return {
@@ -2172,7 +2172,7 @@ const App = () => {
                         breakdown: {}
                     };
                 }
-                stats[record.date].totalPoints += record.points;
+                stats[record.date].totalPoints += Number(record.points || 0);
                 if (['early', 'late', 'monthlyMass'].includes(record.type)) {
                     stats[record.date].uniqueAttendees.add(std.id);
                 }
@@ -3473,7 +3473,7 @@ const App = () => {
                                                         .map(s => {
                                                             const dailyPoints = (s.attendanceHistory || [])
                                                                 .filter(h => h.date === stat.date)
-                                                                .reduce((sum, h) => sum + h.points, 0);
+                                                                .reduce((sum, h) => sum + Number(h.points || 0), 0);
                                                             const isExpanded = expandedSummaryStudentKey === `${stat.date}-${s.id}`;
                                                             return (
                                                                 <div 
