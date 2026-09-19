@@ -244,7 +244,7 @@ const THIRD_SECONDARY_ROSTER_NAMES = [
     "كيرلس ماجد","استيفن منير","جوسيان جرجس","مينا ميلاد","مينا ميالد","نوفير مايكل","ماريو وائل"
 ];
 
-const ROSTER_GRADE_BY_KEY = new Map([
+const ROSTER_GRADE_BY_KEY = new Map<string, string>(
     ...FIRST_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'أولى ثانوي']),
     ...SECOND_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'تانية ثانوي']),
     ...THIRD_SECONDARY_ROSTER_NAMES.map(name => [normalizeRosterStudentName(name), 'تالتة ثانوي']),
