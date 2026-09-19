@@ -617,7 +617,8 @@ const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = 
 
         const history = student.attendanceHistory || [];
         // Super admin can edit historical dates; normal users always operate on current Cairo date/time.
-        const isHistoricalEdit = isSuperAdmin && Boolean(selectedDate) && !fromScan;
+        const todayCairoDate = getCairoDateKey();
+        const isHistoricalEdit = isSuperAdmin && Boolean(selectedDate) && selectedDate !== todayCairoDate && !fromScan;
         const targetDate = selectedDate || getCairoDateKey();
         const currentMonthStr = targetDate.substring(0, 7);
         const targetIsFriday = isFridayDateKey(targetDate);
@@ -1427,7 +1428,7 @@ const App = () => {
         }
         // Use selectedDate only for super-admin historical edits; otherwise use Cairo's current date.
         const dateToRecord = loggedInAdmin.isSuperAdmin && selectedDate && !fromScan ? selectedDate : getCairoDateKey();
-        const isHistoricalEdit = loggedInAdmin.isSuperAdmin && Boolean(selectedDate);
+        const isHistoricalEdit = loggedInAdmin.isSuperAdmin && Boolean(selectedDate) && selectedDate !== getCairoDateKey() && !fromScan;
 
         if (['early', 'late', 'monthlyMass', 'participation', 'gamesStation', 'roots'].includes(type) && !isHistoricalEdit) {
             const windowState = getAttendanceWindow();
@@ -1531,6 +1532,10 @@ const App = () => {
         });
     }, [showToast, loggedInAdmin, selectedDate]);
 
+
+    const handleScanFailure = useCallback(() => {
+        // Scanner-level failures are already rendered by QRScanner itself.
+    }, []);
 
     const handleScanSuccess = useCallback((decodedText) => {
         const windowState = getAttendanceWindow();
@@ -1811,17 +1816,58 @@ const App = () => {
                 const result = event.target?.result;
                 if (typeof result !== 'string') throw new Error('Invalid backup file contents');
                 const data = JSON.parse(result);
-                if (data.students && Array.isArray(data.students)) {
-                    setStudents(data.students);
+                if (!data || typeof data !== 'object' || Array.isArray(data)) {
+                    throw new Error('Invalid backup structure');
+                }
+
+                const isValidStudent = (student) =>
+                    student &&
+                    typeof student === 'object' &&
+                    typeof student.id === 'string' &&
+                    student.id.trim().length > 0 &&
+                    typeof student.name === 'string' &&
+                    student.name.trim().length > 0 &&
+                    (student.attendanceHistory === undefined || Array.isArray(student.attendanceHistory)) &&
+                    (student.points === undefined || Number.isFinite(Number(student.points)));
+
+                const isValidAdmin = (admin) =>
+                    admin &&
+                    typeof admin === 'object' &&
+                    typeof admin.id === 'string' &&
+                    admin.id.trim().length > 0 &&
+                    typeof admin.name === 'string' &&
+                    admin.name.trim().length > 0 &&
+                    typeof admin.pin === 'string' &&
+                    /^\d{4,}$/.test(admin.pin);
+
+                if (data.students !== undefined) {
+                    if (!Array.isArray(data.students) || !data.students.every(isValidStudent)) {
+                        throw new Error('Invalid students data');
+                    }
+                    const importedStudents = data.students.map(student => ({
+                        ...student,
+                        name: student.name.trim(),
+                        points: Number(student.points ?? 0),
+                        attendanceHistory: Array.isArray(student.attendanceHistory) ? student.attendanceHistory : [],
+                    }));
+                    setStudents(importedStudents);
                     showToast('تم استعادة بيانات شباب الأنبا رويس بنجاح.');
                 }
-                if (data.admins && Array.isArray(data.admins)) {
+
+                if (data.admins !== undefined) {
+                    if (!Array.isArray(data.admins) || !data.admins.every(isValidAdmin)) {
+                        throw new Error('Invalid admins data');
+                    }
                     if (loggedInAdmin?.isSuperAdmin) {
                         setAdmins(data.admins);
                         showToast('تم استعادة بيانات الخدام بنجاح.');
                     } else {
                         showToast('استعادة بيانات الخدام متاحة للسوبر أدمن فقط.');
                     }
+                }
+
+                if (data.students === undefined && data.admins === undefined) {
+                    throw new Error('Backup contains no supported data'); 
                 }
                 setBackupModalOpen(false);
             } catch (error) {
@@ -3508,7 +3554,7 @@ const App = () => {
             )}
 
             <Modal isOpen={isScannerOpen} onClose={() => setScannerOpen(false)} title="مسح كود الشاب">
-                <QRScanner onScanSuccess={handleScanSuccess} onScanFailure={(err) => { /* Silently handle failures */ }} />
+                <QRScanner onScanSuccess={handleScanSuccess} onScanFailure={handleScanFailure} />
             </Modal>
             
             <Modal isOpen={!!studentForAttendance} onClose={() => setStudentForAttendance(null)} title={`تسجيل نقاط لـ: ${studentForAttendance?.name}`}>
