@@ -521,7 +521,7 @@ const getStudentMoney = (student) => {
 
 
 const formatCairoDateKeyAr = (dateKey, options = {}) => {
-    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(dateKey || '')) return '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey || '')) return '';
     return new Date(dateKey + 'T12:00:00Z').toLocaleDateString('ar-EG', {
         timeZone: CAIRO_TIMEZONE,
         ...options,
