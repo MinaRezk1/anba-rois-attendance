@@ -3044,6 +3044,19 @@ const App = () => {
                                                     <div className="text-[9px] text-sky-300/90 font-bold text-center mt-1 whitespace-nowrap">
                                                         نقاط السنين السابقة: {student.previousYearsPoints || 0}
                                                     </div>
+                                                    {isMinaAdmin && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleEditStudent(student);
+                                                            }}
+                                                            className="mt-1 text-[9px] text-amber-300 hover:text-amber-200 font-black underline underline-offset-2"
+                                                            title="تعديل نقاط السنين السابقة"
+                                                        >
+                                                            ✏️ تعديل السنين السابقة
+                                                        </button>
+                                                    )}
                                                     <div className="mt-1.5 px-2 py-1 rounded-lg bg-emerald-500/10 border border-emerald-400/25 text-center whitespace-nowrap">
                                                         <div className="text-[8px] text-emerald-300/80 font-bold leading-none">Total Points</div>
                                                         <div className="text-base text-emerald-300 font-black leading-tight">
