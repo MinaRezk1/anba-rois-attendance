@@ -224,11 +224,11 @@ const FIRST_SECONDARY_ROSTER_NAMES = [
 ];
 
 const SECOND_SECONDARY_ROSTER_NAMES = [
-    "فيلوباتير عادل", "جرجس صابر", "فيلوباتير ماهر", "انطونيوس سامح", "يوسف جورج", "بولا مجدي", "ديفيد هاني", "نوفير ماجد", "بيتر عماد", "بافلي سمير", "كيرلس وجدي", "جوفاني مايكل", "ديفيد سامح", "فيلوباتير امجد", "فادي ايهاب", "مكاريوس عاطف", "ابانوب هاني", "جوفاني هاني", "ابرام ياسر", "جورج وجيه", "توني ريمون", "مينا هاني (بخيت)", "جرجس نبيل", "جورج شريف", "كيرلس ماجد", "استيفن منير", "جوسيان جرجس", "مينا ميلاد", "نوفير مايكل", "ماريو وائل"
+    "اندرو صفوت واصف قزمان", "أنطون طارق", "توماس اشرف", "جوناثان ممدوح لبيب", "سبستيان ممدوح فتحي عزمي", "كيرلس اسامة حنا", "يوسف عادل عريان", "يوسف مصباح وليم حنا", "ماريو ممدوح", "انطونيوس سمر عزيز", "بافلي جورج", "توني سعيد جابر", "دانيال يوسف", "فيلوباتير خلف منقريوس", "كيرلس ميالد يوسف فهيم", "كيرلس نادي", "مارك هاني", "مينا جرجس حليم", "ابانوب ايليا ملك", "ابانوب داود بخيت", "بولا ميالد عوض اللة", "كيرلس فليب فوزى", "ماركو عاطف", "مارك أيهاب صالح", "مرقص معوض مرقص", "نوفر جورج طانيوس داود", "نوفر باسلي", "مينا ايهاب عطاهلل عطيه", "مينا ميلاد", "مينا ميالد"
 ];
 
 const THIRD_SECONDARY_ROSTER_NAMES = [
-    "اندرو صفوت واصف قزمان", "أنطون طارق", "توماس اشرف", "جوناثان ممدوح لبيب", "سبستيان ممدوح فتحي عزمي", "كيرلس اسامة حنا", "يوسف عادل عريان", "يوسف مصباح وليم حنا", "ماريو ممدوح", "انطونيوس سمرعزيز", "بافلى جورج", "توني سعيد جابر", "دانيال يوسف", "فيلوباتير خلف منقريوس", "كيرلس ميالد يوسف فهيم", "كيرلس نادي", "مارك هاني", "مينا جرجس حليم", "ابانوب ايليا ملك", "ابانوب داود بخيت", "بولا ميالد عوض اللة", "كيرلس فليب فوزى", "ماركو عاطف", "مارك أيهاب صالح", "مرقص معوض مرقص", "نوفر جورج طانيوس داود", "نوفر باسلي", "مينا ايهاب عطاهلل عطيه"
+    "فيلوباتير عادل", "جرجس صابر", "فيلوباتير ماهر", "انطونيوس سامح", "يوسف جورج", "بولا مجدي", "ديفيد هاني", "نوفير ماجد", "بيتر عماد", "بافلي سمير", "كيرلس وجدي", "جوفاني مايكل", "ديفيد سامح", "فيلوباتير امجد", "فادي ايهاب", "مكاريوس عاطف", "ابانوب هاني", "جوفاني هاني", "ابرام ياسر", "جورج وجيه", "توني ريمون", "مينا هاني (بخيت)", "جرجس نبيل", "جورج شريف", "كيرلس ماجد", "استيفن منير", "جوسيان جرجس", "مينا ميلاد", "نوفير مايكل", "ماريو وائل"
 ];
 
 const ROSTER_GRADE_BY_KEY = new Map<string, string>([
@@ -239,6 +239,47 @@ const ROSTER_GRADE_BY_KEY = new Map<string, string>([
 
 const getRosterGrade = (name) => ROSTER_GRADE_BY_KEY.get(normalizeRosterStudentName(name)) || '';
 
+const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v1';
+
+const buildExactCurrentRoster = (existingItems) => {
+    const existing = Array.isArray(existingItems) ? existingItems : [];
+    const byName = new Map();
+
+    existing.forEach(student => {
+        const key = normalizeRosterStudentName(student?.name);
+        if (key && !byName.has(key)) byName.set(key, student);
+    });
+
+    return APPROVED_STUDENT_ROSTER_NAMES
+        .filter((name, index, list) => list.findIndex(other => normalizeRosterStudentName(other) === normalizeRosterStudentName(name)) === index)
+        .map(name => {
+            const canonicalName = normalizeRosterStudentName(name) === normalizeRosterStudentName('مينا ميالد')
+                ? 'مينا ميلاد'
+                : name;
+            const existingStudent = byName.get(normalizeRosterStudentName(name))
+                || byName.get(normalizeRosterStudentName(canonicalName));
+            const grade = getRosterGrade(canonicalName);
+
+            if (existingStudent) {
+                return {
+                    ...existingStudent,
+                    name: canonicalName,
+                    ...(grade ? { grade } : {}),
+                };
+            }
+
+            return {
+                id: generateId(),
+                name: canonicalName,
+                phone: '',
+                grade: grade || '',
+                points: 0,
+                lastAttended: null,
+                attendanceHistory: [],
+            };
+        });
+};
+ 
 const filterToApprovedRoster = (items) => Array.isArray(items)
     ? items.map(student => {
         const correctedName = normalizeRosterStudentName(student.name) === normalizeRosterStudentName('مينا ميالد')
@@ -1423,6 +1464,22 @@ const App = () => {
                 const dbItems = docSnap.data()?.items;
                 if (Array.isArray(dbItems)) {
                     const approvedItems = filterToApprovedRoster(dbItems);
+                    const migrationKey = 'church_attendance_roster_migration_2026_09_19_84_v1';
+                    const migrationDone = localStorage.getItem(migrationKey) === 'done';
+                    if (!migrationDone && dbItems.length !== 84) {
+                        const exactRoster = buildExactCurrentRoster(dbItems);
+                        setDoc(doc(db, 'appData', 'students_pre_roster_2026_backup'), {
+                            items: dbItems,
+                            createdAt: new Date().toISOString(),
+                            migrationVersion: CURRENT_ROSTER_MIGRATION_VERSION,
+                        }, { merge: true })
+                            .then(() => setDoc(doc(db, 'appData', 'students_v8'), {
+                                items: exactRoster,
+                                rosterMigrationVersion: CURRENT_ROSTER_MIGRATION_VERSION,
+                            }, { merge: true }))
+                            .then(() => localStorage.setItem(migrationKey, 'done'))
+                            .catch(err => console.error("Error applying 84-student roster migration:", err));
+                    }
                     const str = JSON.stringify(approvedItems);
                     lastStudentsDB.current = str;
                     localStorage.setItem('church_attendance_students_v8', str);
