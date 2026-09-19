@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.10';
+const APP_VERSION = '2026.09.19.11';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -3213,7 +3213,7 @@ const App = () => {
                                                         </button>
                                                     )}
                                                     <div className="mt-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-400/30 text-center whitespace-nowrap">
-                                                        <div className="text-[9px] text-emerald-200 font-black leading-none">TOTAL POINTS</div>
+                                                        <div className="text-[9px] text-emerald-200 font-black leading-none">TOTAL POINTS (السابق + الحالي)</div>
                                                         <div className="text-lg text-emerald-300 font-black leading-tight">
                                                             {getStudentTotalPoints(student)}
                                                         </div>
@@ -4798,153 +4798,3 @@ const App = () => {
                             <span className="text-amber-400 font-bold text-sm shrink-0">نقطة</span>
                         </div>
                     </div>
-
-                    {/* Date Field (Defaults to First Friday of following month) */}
-                    <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                            <label className="text-xs text-indigo-300 font-bold">تاريخ تسجيل المكافأة:</label>
-                            <span className="text-[11px] text-amber-300 font-semibold bg-amber-400/15 px-2 py-0.5 rounded border border-amber-400/30">
-                                📅 أول جمعة في الشهر التالي ({rewardDate})
-                            </span>
-                        </div>
-                        <input
-                            type="date"
-                            value={rewardDate}
-                            onChange={(e) => setRewardDate(e.target.value)}
-                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-sm focus:outline-none focus:border-amber-400 font-mono"
-                        />
-                        <p className="text-[11px] text-indigo-300 mt-1">
-                            تم ضبط التاريخ تلقائياً على أول جمعة في الشهر التالي ({rewardDate}) ويمكنك تغييره يدوياً إذا رغبت.
-                        </p>
-                    </div>
-
-                    {/* Description / Reason */}
-                    <div>
-                        <label className="block text-xs text-indigo-300 font-bold mb-1.5">البيان / الوصف (يظهر في سجل الشاب):</label>
-                        <input
-                            type="text"
-                            value={rewardCustomDesc}
-                            onChange={(e) => setRewardCustomDesc(e.target.value)}
-                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-sm focus:outline-none focus:border-amber-400"
-                        />
-                    </div>
-
-                    <div className="pt-2 flex gap-3">
-                        <button
-                            type="button"
-                            onClick={handleGrantMonthlyChampionReward}
-                            className="flex-1 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-indigo-950 font-black py-3 rounded-xl transition-all shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 text-sm md:text-base"
-                        >
-                            <span>🏆</span>
-                            <span>إضافة المكافأة للشاب الآن</span>
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setMonthlyChampionModalOpen(false)}
-                            className="bg-indigo-800 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition-colors text-sm"
-                        >
-                            إلغاء
-                        </button>
-                    </div>
-                </div>
-            </Modal>
-
-            {/* --- Manual Badges Reward Modal --- */}
-            <Modal
-                isOpen={isBadgeRewardModalOpen && !!badgeRewardStudent}
-                onClose={() => setBadgeRewardModalOpen(false)}
-                title={`🎖️ منح مكافأة تجميع الأوسمة لـ (${badgeRewardStudent?.name})`}
-            >
-                <div className="space-y-4 text-right font-sans" dir="rtl">
-                    <div className="bg-purple-500/10 border border-purple-500/30 p-3 rounded-xl">
-                        <p className="text-xs text-purple-200 leading-relaxed font-semibold">
-                            ✨ تجميع الأوسمة يتم مكافأته يدويًا من خلالك. حدد عدد النقاط والتاريخ الذي ترغب في إضافته للشاب.
-                        </p>
-                    </div>
-
-                    {/* Points Presets */}
-                    <div>
-                        <label className="block text-xs text-indigo-300 font-bold mb-1.5">عدد النقاط الممنوحة:</label>
-                        <div className="flex gap-2 mb-2">
-                            {['15', '20', '25', '30'].map(pts => (
-                                <button
-                                    key={pts}
-                                    type="button"
-                                    onClick={() => setBadgeRewardPoints(pts)}
-                                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${badgeRewardPoints === pts ? 'bg-purple-500 text-white font-black shadow' : 'bg-indigo-900/60 text-indigo-200 hover:bg-indigo-800'}`}
-                                >
-                                    +{pts} نقطة
-                                </button>
-                            ))}
-                        </div>
-                        <input
-                            type="number"
-                            min="1"
-                            value={badgeRewardPoints}
-                            onChange={(e) => setBadgeRewardPoints(e.target.value)}
-                            placeholder="عدد النقاط"
-                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-base font-bold text-center focus:outline-none focus:border-purple-400"
-                        />
-                    </div>
-
-                    {/* Date */}
-                    <div>
-                        <label className="block text-xs text-indigo-300 font-bold mb-1.5">تاريخ تسجيل المكافأة:</label>
-                        <input
-                            type="date"
-                            value={badgeRewardDate}
-                            onChange={(e) => setBadgeRewardDate(e.target.value)}
-                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-sm focus:outline-none focus:border-purple-400 font-mono"
-                        />
-                    </div>
-
-                    {/* Description */}
-                    <div>
-                        <label className="block text-xs text-indigo-300 font-bold mb-1.5">البيان / الوصف:</label>
-                        <input
-                            type="text"
-                            value={badgeRewardDesc}
-                            onChange={(e) => setBadgeRewardDesc(e.target.value)}
-                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-sm focus:outline-none focus:border-purple-400"
-                        />
-                    </div>
-
-                    <div className="pt-2 flex gap-3">
-                        <button type="button" onClick={handleGrantBadgeReward} className="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black py-3 rounded-xl transition-all shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 text-sm md:text-base">
-                            <span>🎖️</span><span>إضافة مكافأة الأوسمة الآن</span>
-                        </button>
-                        <button type="button" onClick={() => setBadgeRewardModalOpen(false)} className="bg-indigo-800 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition-colors text-sm">إلغاء</button>
-                    </div>
-                </div>
-            </Modal>
-
-            {/* --- Mina Only Leaderboard Points & Money Control Modal --- */}
-            <Modal
-                isOpen={!!studentForPointsEdit && isMinaAdmin}
-                onClose={() => setStudentForPointsEdit(null)}
-                title="التحكم بالنواحي والفلوس (خاص بالخادم مينا) ⚖️"
-            >
-                {studentForPointsEdit && (
-                    <div className="space-y-5 text-right font-sans" dir="rtl">
-                        <div className="bg-indigo-950/80 p-4 rounded-xl border border-indigo-800/60 flex items-center justify-between">
-                            <div><h3 className="font-black text-amber-400 text-base md:text-lg">{studentForPointsEdit.name}</h3><p className="text-xs text-indigo-300 mt-0.5">تعديل رصيد النقاط والفلوس في لوحة الصدارة</p></div>
-                            <div className="bg-amber-500/20 text-amber-300 px-3.5 py-2 rounded-xl border border-amber-500/30 text-xs font-black shadow-inner">الرصيد الحالي: {studentForPointsEdit.pointsForLeaderboard ?? studentForPointsEdit.points ?? 0} نقطة | {getStudentMoney(studentForPointsEdit)} جنيه</div>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40"><label className="block text-xs font-bold text-amber-300 mb-2">عدد النقاط المطلوب 🎯</label><div className="relative"><input type="number" value={targetPointsInput} onChange={(e) => handlePointsInputChange(e.target.value)} placeholder="مثال: 100" className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right" /><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">نقطة</span></div></div>
-                            <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40"><label className="block text-xs font-bold text-amber-300 mb-2">القيمة بالجنيه 💰 (مستقلة تماماً)</label><div className="relative"><input type="number" value={targetMoneyInput} onChange={(e) => handleMoneyInputChange(e.target.value)} placeholder="مثال: 50" className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right" /><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">جنيه</span></div></div>
-                        </div>
-                        <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-xl text-xs text-amber-200/90 leading-relaxed">💡 <span className="font-bold text-amber-300">تنويه:</span> النقاط والجنيهات منفصلان تماماً. يمكنك إدخال أي عدد نقاط وأي مبلغ بالجنيه بشكل مستقل دون تأثر إحداهما بالأخرى.</div>
-                        <div className="flex gap-3 pt-2">
-                            <button onClick={handleSavePointsEdit} className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-indigo-950 font-black py-3 rounded-xl transition-all text-sm shadow-md active:scale-[0.98]">حفظ التغييرات 💾</button>
-                            <button onClick={() => setStudentForPointsEdit(null)} className="px-5 bg-indigo-900 hover:bg-indigo-800 text-indigo-200 font-bold py-3 rounded-xl transition-all text-sm">إلغاء</button>
-                        </div>
-                    </div>
-                )}
-            </Modal>
-
-        </div>
-    );
-};
-
-export default App;
