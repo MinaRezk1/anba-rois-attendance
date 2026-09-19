@@ -108,6 +108,117 @@ const getMeetingTimeMessage = () => {
     return 'الحضور يوم الجمعة فقط';
 };
 
+// --- Current student roster whitelist (source rosters only) ---
+const APPROVED_STUDENT_ROSTER_NAMES = [
+    "أمير رأفت ميخائيل",
+    "أمير رأفت وهبة",
+    "بافلي هاني عدلي",
+    "بولا انطون جرجس",
+    "بولا فيليب فوزي",
+    "بيشوي جرجس فتحي",
+    "بيشوي جوزيف وجدي",
+    "جورج كرم عبدة",
+    "جيوفاني رؤوف وهبة",
+    "رامز عماد عبيد",
+    "استيفن جورج",
+    "فادي عادل عريان",
+    "فيلوباتير أسامة رمسيس",
+    "فيلوباتير عصام جرجس",
+    "فيلوباتير عماد عبيد",
+    "فيلوباتير وليد حنين",
+    "كرلس عادل",
+    "كيرلس عادل",
+    "كرلس نادي فرج",
+    "كيرلس نادي فرح",
+    "كيرلس هاني فكري",
+    "كيفين رامي حنا",
+    "كيفين هاني عزيز",
+    "مارسيليو سامر سعيد",
+    "مايكل طارق عوض",
+    "مينا هاني سمير",
+    "يوسف مايكل عجيب",
+    "يوسف روماني",
+    "اندرو صفوت واصف قزمان",
+    "أنطون طارق",
+    "توماس اشرف",
+    "جوناثان ممدوح لبيب",
+    "سبستيان ممدوح فتحي عزمي",
+    "كيرلس اسامة حنا",
+    "يوسف عادل عريان",
+    "يوسف مصباح وليم حنا",
+    "ماريو ممدوح",
+    "انطونيوس سمر عزيز",
+    "بافلي جورج",
+    "توني سعيد جابر",
+    "دانيال يوسف",
+    "فيلوباتير خلف منقريوس",
+    "كيرلس ميالد يوسف فهيم",
+    "كيرلس نادي",
+    "مارك هاني",
+    "مينا جرجس حليم",
+    "ابانوب ايليا ملك",
+    "ابانوب داود بخيت",
+    "بولا ميالد عوض الله",
+    "بولا ميالد عوض اللة",
+    "كيرلس فليب فوزي",
+    "ماركو عاطف",
+    "مارك ايهاب صلاح",
+    "مرقص معوض مرقص",
+    "نوفير جورج طانيوس داود",
+    "نوفير باسلي",
+    "مينا ايهاب عطالله عطية",
+    "فيلوباتير عادل",
+    "جرجس صابر",
+    "فيلوباتير ماهر",
+    "انطونيوس سامح",
+    "يوسف جورج",
+    "بولا مجدي",
+    "ديفيد هاني",
+    "نوفير ماجد",
+    "بيتر عماد",
+    "بافلي سمير",
+    "كيرلس وجدي",
+    "جوفاني مايكل",
+    "ديفيد سامح",
+    "فيلوباتير امجد",
+    "فادي ايهاب",
+    "مكاريوس عاطف",
+    "ابانوب هاني",
+    "جوفاني هاني",
+    "ابرام ياسر",
+    "جورج وجيه",
+    "توني ريمون",
+    "مينا هاني (بخيت)",
+    "مينا هاني بخيت",
+    "جرجس نبيل",
+    "جورج شريف",
+    "كيرلس ماجد",
+    "استيفن منير",
+    "جوسيان جرجس",
+    "مينا ميالد",
+    "نوفير مايكل",
+    "ماريو وائل",
+];
+
+const normalizeRosterStudentName = (name) => String(name || '')
+    .normalize('NFKC')
+    .replace(/[\u064B-\u065F\u0670]/g, '')
+    .replace(/[إأآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/اللة/g, 'الله')
+    .replace(/كرلس/g, 'كيرلس')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .toLowerCase();
+
+const APPROVED_STUDENT_ROSTER_KEYS = new Set(APPROVED_STUDENT_ROSTER_NAMES.map(normalizeRosterStudentName));
+
+const isApprovedRosterStudent = (student) => Boolean(
+    student && APPROVED_STUDENT_ROSTER_KEYS.has(normalizeRosterStudentName(student.name))
+);
+
+const filterToApprovedRoster = (items) => Array.isArray(items) ? items.filter(isApprovedRosterStudent) : [];
+
 // --- Badges & Milestones Config ---
 const getCurrentMonthPrefix = () => getCairoMonthPrefix();
 
@@ -1093,7 +1204,8 @@ const App = () => {
         if (local) {
             try {
                 const parsed = JSON.parse(local);
-                if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+                const approved = filterToApprovedRoster(parsed);
+                if (approved.length > 0) return approved;
             } catch (e) {}
         }
         return [];
@@ -1237,10 +1349,15 @@ const App = () => {
             if (docSnap.exists()) {
                 const dbItems = docSnap.data()?.items;
                 if (Array.isArray(dbItems)) {
-                    const str = JSON.stringify(dbItems);
+                    const approvedItems = filterToApprovedRoster(dbItems);
+                    const str = JSON.stringify(approvedItems);
                     lastStudentsDB.current = str;
                     localStorage.setItem('church_attendance_students_v8', str);
-                    setStudents(dbItems);
+                    setStudents(approvedItems);
+                    if (approvedItems.length !== dbItems.length) {
+                        setDoc(doc(db, 'appData', 'students_v8'), { items: approvedItems }, { merge: true })
+                            .catch(err => console.error("Error cleaning students outside current rosters:", err));
+                    }
                 } else {
                     setStudents([]);
                 }
@@ -1249,8 +1366,9 @@ const App = () => {
                 if (local) {
                     try {
                         const parsed = JSON.parse(local);
-                        if (parsed.length > 0) {
-                            setStudents(parsed);
+                        const approved = filterToApprovedRoster(parsed);
+                        if (approved.length > 0) {
+                            setStudents(approved);
                             return;
                         }
                     } catch(e) {}
