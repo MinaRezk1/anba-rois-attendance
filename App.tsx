@@ -4723,3 +4723,58 @@ const App = () => {
                         <input
                             type="date"
                             value={badgeRewardDate}
+                            onChange={(e) => setBadgeRewardDate(e.target.value)}
+                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-sm focus:outline-none focus:border-purple-400 font-mono"
+                        />
+                    </div>
+
+                    {/* Description */}
+                    <div>
+                        <label className="block text-xs text-indigo-300 font-bold mb-1.5">البيان / الوصف:</label>
+                        <input
+                            type="text"
+                            value={badgeRewardDesc}
+                            onChange={(e) => setBadgeRewardDesc(e.target.value)}
+                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-sm focus:outline-none focus:border-purple-400"
+                        />
+                    </div>
+
+                    <div className="pt-2 flex gap-3">
+                        <button type="button" onClick={handleGrantBadgeReward} className="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black py-3 rounded-xl transition-all shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 text-sm md:text-base">
+                            <span>🎖️</span><span>إضافة مكافأة الأوسمة الآن</span>
+                        </button>
+                        <button type="button" onClick={() => setBadgeRewardModalOpen(false)} className="bg-indigo-800 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition-colors text-sm">إلغاء</button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* --- Mina Only Leaderboard Points & Money Control Modal --- */}
+            <Modal
+                isOpen={!!studentForPointsEdit && isMinaAdmin}
+                onClose={() => setStudentForPointsEdit(null)}
+                title="التحكم بالنواحي والفلوس (خاص بالخادم مينا) ⚖️"
+            >
+                {studentForPointsEdit && (
+                    <div className="space-y-5 text-right font-sans" dir="rtl">
+                        <div className="bg-indigo-950/80 p-4 rounded-xl border border-indigo-800/60 flex items-center justify-between">
+                            <div><h3 className="font-black text-amber-400 text-base md:text-lg">{studentForPointsEdit.name}</h3><p className="text-xs text-indigo-300 mt-0.5">تعديل رصيد النقاط والفلوس في لوحة الصدارة</p></div>
+                            <div className="bg-amber-500/20 text-amber-300 px-3.5 py-2 rounded-xl border border-amber-500/30 text-xs font-black shadow-inner">الرصيد الحالي: {studentForPointsEdit.pointsForLeaderboard ?? studentForPointsEdit.points ?? 0} نقطة | {getStudentMoney(studentForPointsEdit)} جنيه</div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40"><label className="block text-xs font-bold text-amber-300 mb-2">عدد النقاط المطلوب 🎯</label><div className="relative"><input type="number" value={targetPointsInput} onChange={(e) => handlePointsInputChange(e.target.value)} placeholder="مثال: 100" className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right" /><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">نقطة</span></div></div>
+                            <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40"><label className="block text-xs font-bold text-amber-300 mb-2">القيمة بالجنيه 💰 (مستقلة تماماً)</label><div className="relative"><input type="number" value={targetMoneyInput} onChange={(e) => handleMoneyInputChange(e.target.value)} placeholder="مثال: 50" className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right" /><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">جنيه</span></div></div>
+                        </div>
+                        <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-xl text-xs text-amber-200/90 leading-relaxed">💡 <span className="font-bold text-amber-300">تنويه:</span> النقاط والجنيهات منفصلان تماماً. يمكنك إدخال أي عدد نقاط وأي مبلغ بالجنيه بشكل مستقل دون تأثر إحداهما بالأخرى.</div>
+                        <div className="flex gap-3 pt-2">
+                            <button onClick={handleSavePointsEdit} className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-indigo-950 font-black py-3 rounded-xl transition-all text-sm shadow-md active:scale-[0.98]">حفظ التغييرات 💾</button>
+                            <button onClick={() => setStudentForPointsEdit(null)} className="px-5 bg-indigo-900 hover:bg-indigo-800 text-indigo-200 font-bold py-3 rounded-xl transition-all text-sm">إلغاء</button>
+                        </div>
+                    </div>
+                )}
+            </Modal>
+
+        </div>
+    );
+};
+
+export default App;
