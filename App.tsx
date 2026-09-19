@@ -217,7 +217,7 @@ const LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY = {
     "يوسفمصباحوليمحنا": 94
 };
 
-const ROSTER_PHONE_BY_KEY: Record<string, string> = {
+const ROSTER_PHONE_BY_KEY: Record<string, string> = Object.fromEntries([
     ["فيلوباتير عادل", "01202821716"],
     ["جرجس صابر", "01222608959"],
     ["فيلوباتير ماهر", "01064383757"],
@@ -302,7 +302,7 @@ const ROSTER_PHONE_BY_KEY: Record<string, string> = {
     ["مينا هاني سمير", "0115019418"],
     ["يوسف مايكل عجيب", "01221788540"],
     ["يوسف روماني", "01285046844"]
-].map(([name, phone]) => [normalizeRosterStudentName(name), phone] as [string, string]));
+].map(([name, phone]) => [normalizeRosterStudentName(name), phone]));
 
 const buildExactCurrentRoster = (existingItems) => {
     const existing = Array.isArray(existingItems) ? existingItems : [];
