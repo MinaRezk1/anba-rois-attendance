@@ -195,6 +195,7 @@ const APPROVED_STUDENT_ROSTER_NAMES = [
     "كيرلس ماجد",
     "استيفن منير",
     "جوسيان جرجس",
+    "مينا ميلاد",
     "مينا ميالد",
     "نوفير مايكل",
     "ماريو وائل",
@@ -217,7 +218,12 @@ const isApprovedRosterStudent = (student) => Boolean(
     student && APPROVED_STUDENT_ROSTER_KEYS.has(normalizeRosterStudentName(student.name))
 );
 
-const filterToApprovedRoster = (items) => Array.isArray(items) ? items.filter(isApprovedRosterStudent) : [];
+const filterToApprovedRoster = (items) => Array.isArray(items) ? items
+    .filter(isApprovedRosterStudent)
+    .map(student => normalizeRosterStudentName(student.name) === normalizeRosterStudentName('مينا ميالد')
+        ? { ...student, name: 'مينا ميلاد' }
+        : student
+    ) : [];
 
 // --- Badges & Milestones Config ---
 const getCurrentMonthPrefix = () => getCairoMonthPrefix();
