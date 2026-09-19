@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.12';
+const APP_VERSION = '2026.09.19.6';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -155,7 +155,7 @@ const getStudentTotalPoints = (student) => (
     Number(student?.points || 0) + Number(student?.previousYearsPoints || 0)
 );
 
-const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v5';
+const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v6';
 
 const LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY = {
     "انطونطارق": 69,
@@ -217,7 +217,7 @@ const LEGACY_PREVIOUS_POINTS_BY_ROSTER_KEY = {
     "يوسفمصباحوليمحنا": 94
 };
 
-const ROSTER_PHONE_BY_KEY = new Map<string, string>(
+const ROSTER_PHONE_BY_KEY = new Map<string, string>([
     ["فيلوباتير عادل", "01202821716"],
     ["جرجس صابر", "01222608959"],
     ["فيلوباتير ماهر", "01064383757"],
