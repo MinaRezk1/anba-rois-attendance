@@ -639,11 +639,11 @@ const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = 
         const hasReceivedGamesStationToday = hasReceivedPointsToday('gamesStation');
         const hasReceivedRootsToday = hasReceivedPointsToday('roots');
         const hasReceivedMassThisMonth = history.some(h =>
-            h.date.startsWith(currentMonthStr) && h.type === 'monthlyMass'
+            h.date && h.date.startsWith(currentMonthStr) && h.type === 'monthlyMass'
         );
         
         const hasReceivedConfessionThisMonth = history.some(h =>
-            h.date.startsWith(currentMonthStr) && h.type === 'confession'
+            h.date && h.date.startsWith(currentMonthStr) && h.type === 'confession'
         );
         const canAddConfession = !hasReceivedConfessionThisMonth;
         const regularMeetingTimeAllowed = meetingTimeAllowed && (!isHistoricalEdit ? currentWindow?.kind !== 'monthlyMass' : true);
