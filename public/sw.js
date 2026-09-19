@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sec-boys-v5-2026-09-19';
+const CACHE_NAME = 'sec-boys-v6-2026-09-19';
 const BASE_URL = new URL('./', self.registration.scope).toString();
 const ASSETS = [
   BASE_URL,
