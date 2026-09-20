@@ -4,10 +4,8 @@ import { db } from './firebase';
 import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 import { getApp } from 'firebase/app';
 import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const auth = getAuth(getApp()); // بيستخدم نفس مشروع Firebase بتاعك أوتوماتيك
-const storage = getStorage(getApp());
 
 // ============================================================
 // إعدادات
@@ -128,8 +126,8 @@ const GiftsShopWidget: React.FC = () => {
       <button
         onClick={() => setOpen(true)}
         style={{
-          position: 'fixed', bottom: '20px', left: '20px', zIndex: 9998,
-          width: '60px', height: '60px', borderRadius: '50%',
+          position: 'fixed', bottom: '90px', left: '16px', zIndex: 9998,
+          width: '56px', height: '56px', borderRadius: '50%',
           background: 'linear-gradient(135deg, #f59e0b, #d97706)',
           boxShadow: '0 4px 14px rgba(245,158,11,0.5)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -426,6 +424,29 @@ const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({
   </div>
 );
 
+// بيضغط الصورة ويصغّرها قبل التخزين المباشر (من غير أي خدمة خارجية أو بطاقة ائتمان)
+const compressImage = (file: File): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const maxSize = 700;
+      let { width, height } = img;
+      if (width > height && width > maxSize) { height = Math.round(height * (maxSize / width)); width = maxSize; }
+      else if (height > maxSize) { width = Math.round(width * (maxSize / height)); height = maxSize; }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.55));
+    };
+    img.onerror = reject;
+    img.src = reader.result as string;
+  };
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+
 const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (p: Product) => void; onDelete: () => void }> = ({ product, onClose, onSave, onDelete }) => {
   const [p, setP] = useState<Product>({ ...product, images: product.images || [] });
   const [uploading, setUploading] = useState(false);
@@ -437,15 +458,12 @@ const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (
     try {
       const urls: string[] = [];
       for (const file of Array.from(files)) {
-        const path = `gifts/${p.id}/${Date.now()}_${file.name}`;
-        const storageRef = ref(storage, path);
-        await uploadBytes(storageRef, file);
-        const url = await getDownloadURL(storageRef);
-        urls.push(url);
+        const dataUrl = await compressImage(file);
+        urls.push(dataUrl);
       }
       setP(prev => ({ ...prev, images: [...prev.images, ...urls] }));
     } catch (e) {
-      alert('حصل خطأ في رفع الصورة، حاول تاني');
+      alert('حصل خطأ في معالجة الصورة، جرب صورة تانية');
     } finally {
       setUploading(false);
     }
@@ -470,12 +488,30 @@ const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (
         </div>
       )}
       <label style={{
-        display: 'block', textAlign: 'center', padding: '14px', marginBottom: '10px', borderRadius: '10px',
+        display: 'block', textAlign: 'center', padding: '14px', marginBottom: '8px', borderRadius: '10px',
         border: '2px dashed #4338ca', color: '#a5b4fc', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
       }}>
-        {uploading ? 'جاري الرفع...' : '📷 اختر صور من الموبايل / الكمبيوتر'}
+        {uploading ? 'جاري المعالجة...' : '📷 اختر صور من الموبايل / الكمبيوتر'}
         <input type="file" accept="image/*" multiple disabled={uploading} onChange={e => handleFiles(e.target.files)} style={{ display: 'none' }} />
       </label>
+
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+        <input
+          id="img-url-input"
+          style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #4338ca', background: '#0f0a2e', color: 'white', fontSize: '13px' }}
+          placeholder="أو الصق رابط صورة (imgbb.com مثلاً) بجودة أعلى"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            const el = document.getElementById('img-url-input') as HTMLInputElement;
+            const url = el?.value?.trim();
+            if (url) { setP(prev => ({ ...prev, images: [...prev.images, url] })); el.value = ''; }
+          }}
+          style={{ padding: '0 16px', borderRadius: '8px', border: 'none', background: '#312e81', color: 'white', fontWeight: 700, fontSize: '13px' }}>
+          إضافة
+        </button>
+      </div>
 
       <label style={{ color: '#c7d2fe', fontSize: '12px' }}>تكلفة النقط</label>
       <input style={inputStyle} type="number" value={p.points} onChange={e => setP({ ...p, points: Number(e.target.value) || 0 })} />

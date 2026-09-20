@@ -2992,26 +2992,6 @@ const App = () => {
                              <TrophyIcon className="w-5 h-5" />
                              <span className="whitespace-nowrap">Leaders Board</span>
                          </button>
-                         {isMinaAdmin && (
-                             <button onClick={() => setActiveView('badge_alerts')} className={`flex-1 min-w-[140px] text-center rounded-lg py-2 font-bold flex items-center justify-center gap-2 transition-colors relative ${activeView === 'badge_alerts' ? 'bg-indigo-700 text-amber-400' : 'text-indigo-300 hover:bg-indigo-800/50'}`}>
-                                 <div className="relative">
-                                     <BellIcon className="w-5 h-5" />
-                                     {pendingBadgesCount > 0 && (
-                                         <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-400 rounded-full animate-ping" />
-                                     )}
-                                 </div>
-                                 <span className="whitespace-nowrap">تنبيهات الأوسمة</span>
-                                 {pendingBadgesCount > 0 ? (
-                                     <span className="bg-amber-500 text-indigo-950 text-[11px] font-black px-1.5 py-0.5 rounded-full shadow-sm">
-                                         {pendingBadgesCount} مستحق
-                                     </span>
-                                 ) : (
-                                     <span className="bg-indigo-950/60 text-indigo-300 text-[11px] font-bold px-1.5 py-0.5 rounded-full">
-                                         {allBadgeAlerts.length}
-                                     </span>
-                                 )}
-                             </button>
-                         )}
                          <button onClick={() => setActiveView('attendance_summary')} className={`flex-1 min-w-[120px] text-center rounded-lg py-2 font-bold flex items-center justify-center gap-2 transition-colors ${activeView === 'attendance_summary' ? 'bg-indigo-700 text-amber-400' : 'text-indigo-300 hover:bg-indigo-800/50'}`}>
                             <CalendarIcon className="w-5 h-5" />
                             <span className="whitespace-nowrap">سجل الاجتماعات</span>
