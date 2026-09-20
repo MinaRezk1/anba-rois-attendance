@@ -2,6 +2,7 @@ import React from 'react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './index.css';
 import { db } from './firebase';
+import './GiftsShop';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 
 
