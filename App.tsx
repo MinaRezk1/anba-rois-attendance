@@ -2047,7 +2047,7 @@ const App = () => {
             return;
         }
 
-        setStudents(prev => prev.map(s => {
+        const updatedStudents = students.map(s => {
             if (s.id === studentId) {
                 return {
                     ...s,
@@ -2058,7 +2058,8 @@ const App = () => {
                 };
             }
             return s;
-        }));
+        });
+        saveStudentsData(updatedStudents);
         
         setEditingStudent(null);
         showToast('تم تحديث البيانات بنجاح');
