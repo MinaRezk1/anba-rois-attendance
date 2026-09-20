@@ -568,7 +568,7 @@ const OrderForm: React.FC<{ product: Product; students: any[]; onClose: () => vo
         (window as any)._recaptchaVerifier = new RecaptchaVerifier(auth, recaptchaRef.current!, { size: 'invisible' });
       }
       const verifier = (window as any)._recaptchaVerifier;
-      const intlPhone = '+2' + '0' + normalized; // تحويل الرقم لصيغة مصر الدولية +20
+      const intlPhone = '+20' + normalized; // تحويل الرقم لصيغة مصر الدولية +20
       const result = await signInWithPhoneNumber(auth, intlPhone, verifier);
       confirmationRef.current = result;
       setStep('code');
