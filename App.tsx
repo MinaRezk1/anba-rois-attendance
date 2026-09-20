@@ -2,7 +2,6 @@ import React from 'react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './index.css';
 import { db } from './firebase';
-import './GiftsShop';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 
 
@@ -2659,6 +2658,12 @@ const App = () => {
         const name = loggedInAdmin.name.trim();
         return name.includes('مينا') || name.toLowerCase().includes('mina');
     }, [loggedInAdmin]);
+
+    // بث حالة دخول مينا لملف الهدايا (GiftsShop.tsx) المستقل - إضافة فقط، مش بتغيّر أي منطق موجود
+    useEffect(() => {
+        window.__isMinaAdmin = isMinaAdmin;
+        window.dispatchEvent(new CustomEvent('mina-admin-status', { detail: isMinaAdmin }));
+    }, [isMinaAdmin]);
 
     const openMonthlyChampionModal = (preselectedStudentId = '', defaultRank = 'المركز الأول', defaultPts = '20', monthType = 'prev') => {
         setRewardTargetMonth(monthType);

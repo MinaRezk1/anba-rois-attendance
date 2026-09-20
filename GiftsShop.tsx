@@ -4,13 +4,14 @@ import { db } from './firebase';
 import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 import { getApp } from 'firebase/app';
 import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const auth = getAuth(getApp()); // بيستخدم نفس مشروع Firebase بتاعك أوتوماتيك
+const storage = getStorage(getApp());
 
 // ============================================================
-// إعدادات - غيّرها زي ما تحب
+// إعدادات
 // ============================================================
-const ADMIN_PIN = '2026'; // الرقم السري لدخول وضع الأدمن (غيّره لأي رقم تحبه)
 const SHOP_DOC = doc(db, 'shop', 'data'); // مستند مستقل تمامًا لبيانات المتجر
 const STUDENTS_DOC = doc(db, 'appData', 'students_v8'); // نفس مستند بيانات الطلاب والنقط الأساسي
 
@@ -23,6 +24,10 @@ const normalizePhone = (value: string) => {
 // إجمالي نقط الطالب = نقط السنة الحالية + نقط السنين اللي فاتت (نفس منطق التطبيق الأساسي)
 const getTotalPoints = (student: any) => (Number(student?.points) || 0) + (Number(student?.previousYearsPoints) || 0);
 
+declare global {
+  interface Window { __isMinaAdmin?: boolean; }
+}
+
 // ============================================================
 // أنواع البيانات
 // ============================================================
@@ -30,7 +35,7 @@ type ProductSize = { label: string; qty: number };
 type Product = {
   id: string;
   name: string;
-  imageUrl: string;
+  images: string[]; // ممكن أكتر من صورة للهدية الواحدة
   points: number;
   sizes: ProductSize[]; // لو مفيش مقاسات، حط عنصر واحد { label: 'عادي', qty: X }
   description?: string;
@@ -59,19 +64,49 @@ const GiftsShopWidget: React.FC = () => {
   const [shop, setShop] = useState<ShopData>(DEFAULT_SHOP);
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [showAdminLogin, setShowAdminLogin] = useState(false);
-  const [pinInput, setPinInput] = useState('');
+  const [isAdmin, setIsAdmin] = useState(() => !!(window as any).__isMinaAdmin);
   const [adminTab, setAdminTab] = useState<'products' | 'orders'>('products');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [orderingProduct, setOrderingProduct] = useState<Product | null>(null);
+  const [galleryProduct, setGalleryProduct] = useState<Product | null>(null);
+  const seenOrderIds = useRef<Set<string> | null>(null);
+
+  // بيتابع حالة دخول مينا من App.tsx مباشرة - لما يدخل بالباسورد بتاعه في الموقع الأساسي، وضع الأدمن هنا يتفعل أوتوماتيك
+  useEffect(() => {
+    const handler = (e: any) => setIsAdmin(!!e.detail);
+    window.addEventListener('mina-admin-status', handler);
+    return () => window.removeEventListener('mina-admin-status', handler);
+  }, []);
+
+  // اطلب إذن التنبيهات من المتصفح مرة واحدة لما يبقى مينا داخل، عشان يوصله تنبيه لما حد يحجز
+  useEffect(() => {
+    if (isAdmin && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, [isAdmin]);
 
   useEffect(() => {
     const unsub = onSnapshot(SHOP_DOC, (snap) => {
       const data = snap.exists() ? (snap.data() as ShopData) : DEFAULT_SHOP;
+      const orders = Array.isArray(data.orders) ? data.orders : [];
+
+      // تنبيه لمينا لما يظهر طلب "محجوز" جديد ماكانش موجود قبل كده
+      if (seenOrderIds.current === null) {
+        // أول تحميل: سجّل اللي موجود بالفعل من غير ما تبعت تنبيهات عليهم
+        seenOrderIds.current = new Set(orders.map(o => o.id));
+      } else {
+        const newReserved = orders.filter(o => o.status === 'reserved' && !seenOrderIds.current!.has(o.id));
+        if (newReserved.length && isAdmin && 'Notification' in window && Notification.permission === 'granted') {
+          newReserved.forEach(o => {
+            new Notification('🎁 حجز هدية جديد', { body: `${o.studentName} حجز "${o.productName}" (${o.points} نقطة)` });
+          });
+        }
+        orders.forEach(o => seenOrderIds.current!.add(o.id));
+      }
+
       setShop({
         products: Array.isArray(data.products) ? data.products : [],
-        orders: Array.isArray(data.orders) ? data.orders : [],
+        orders,
       });
       setLoading(false);
     }, () => setLoading(false));
@@ -80,7 +115,7 @@ const GiftsShopWidget: React.FC = () => {
       setStudents(Array.isArray(items) ? items : []);
     });
     return () => { unsub(); unsubStudents(); };
-  }, []);
+  }, [isAdmin]);
 
   const saveShop = async (next: ShopData) => {
     setShop(next);
@@ -102,7 +137,18 @@ const GiftsShopWidget: React.FC = () => {
         }}
         aria-label="الهدايا"
       >
+        <span style={{ position: 'relative', display: 'inline-block' }}>
         🎁
+        {isAdmin && shop.orders.filter(o => o.status === 'reserved').length > 0 && (
+          <span style={{
+            position: 'absolute', top: '-10px', right: '-14px', background: '#dc2626', color: 'white',
+            borderRadius: '50%', minWidth: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '11px', fontWeight: 800, border: '2px solid #1e1b4b',
+          }}>
+            {shop.orders.filter(o => o.status === 'reserved').length}
+          </span>
+        )}
+        </span>
       </button>
 
       {open && (
@@ -124,12 +170,6 @@ const GiftsShopWidget: React.FC = () => {
               🎁 متجر الهدايا
             </h1>
             <div style={{ display: 'flex', gap: '8px' }}>
-              {!isAdmin && (
-                <button onClick={() => setShowAdminLogin(true)}
-                  style={{ background: 'transparent', border: '1px solid #4338ca', color: '#a5b4fc', borderRadius: '8px', padding: '6px 12px', fontSize: '13px' }}>
-                  دخول الأدمن
-                </button>
-              )}
               {isAdmin && (
                 <span style={{ background: '#059669', color: 'white', borderRadius: '8px', padding: '6px 12px', fontSize: '13px', fontWeight: 700 }}>
                   وضع الأدمن ✓
@@ -172,7 +212,7 @@ const GiftsShopWidget: React.FC = () => {
               <>
                 {isAdmin && (
                   <button
-                    onClick={() => setEditingProduct({ id: genId(), name: '', imageUrl: '', points: 100, sizes: [{ label: 'عادي', qty: 1 }] })}
+                    onClick={() => setEditingProduct({ id: genId(), name: '', images: [], points: 100, sizes: [{ label: 'عادي', qty: 1 }] })}
                     style={{ width: '100%', padding: '14px', marginBottom: '16px', borderRadius: '12px', border: '2px dashed #4338ca', background: 'transparent', color: '#a5b4fc', fontWeight: 700, fontSize: '15px' }}>
                     + إضافة هدية جديدة
                   </button>
@@ -193,10 +233,17 @@ const GiftsShopWidget: React.FC = () => {
                         border: '1px solid #312e81', display: 'flex', flexDirection: 'column',
                       }}>
                         <div style={{ width: '100%', aspectRatio: '1', background: '#312e81', position: 'relative' }}>
-                          {product.imageUrl ? (
-                            <img src={product.imageUrl} alt={product.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          {product.images?.[0] ? (
+                            <img src={product.images[0]} alt={product.name} onClick={() => setGalleryProduct(product)}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }} />
                           ) : (
                             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '40px' }}>🎁</div>
+                          )}
+                          {product.images?.length > 1 && (
+                            <button onClick={() => setGalleryProduct(product)}
+                              style={{ position: 'absolute', bottom: '6px', right: '6px', background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '6px', color: 'white', padding: '4px 8px', fontSize: '11px', fontWeight: 700 }}>
+                              📷 {product.images.length} صور
+                            </button>
                           )}
                           {totalQty === 0 && (
                             <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: '13px' }}>
@@ -283,24 +330,9 @@ const GiftsShopWidget: React.FC = () => {
         </div>
       )}
 
-      {/* مودال دخول الأدمن */}
-      {showAdminLogin && (
-        <Overlay onClose={() => setShowAdminLogin(false)}>
-          <h2 style={{ color: '#fbbf24', fontWeight: 800, marginBottom: '12px' }}>دخول الأدمن</h2>
-          <input
-            type="password" inputMode="numeric" value={pinInput} onChange={e => setPinInput(e.target.value)}
-            placeholder="الرقم السري"
-            style={{ width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #4338ca', background: '#0f0a2e', color: 'white', marginBottom: '12px', textAlign: 'center', fontSize: '18px' }}
-          />
-          <button
-            onClick={() => {
-              if (pinInput === ADMIN_PIN) { setIsAdmin(true); setShowAdminLogin(false); setPinInput(''); }
-              else alert('الرقم غلط');
-            }}
-            style={{ width: '100%', padding: '12px', borderRadius: '10px', border: 'none', background: '#f59e0b', color: '#1e1b4b', fontWeight: 800 }}>
-            دخول
-          </button>
-        </Overlay>
+      {/* مودال معاينة الصور */}
+      {galleryProduct && (
+        <ImageGallery product={galleryProduct} onClose={() => setGalleryProduct(null)} />
       )}
 
       {/* مودال إضافة/تعديل منتج */}
@@ -395,15 +427,56 @@ const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({
 );
 
 const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (p: Product) => void; onDelete: () => void }> = ({ product, onClose, onSave, onDelete }) => {
-  const [p, setP] = useState<Product>(product);
+  const [p, setP] = useState<Product>({ ...product, images: product.images || [] });
+  const [uploading, setUploading] = useState(false);
   const inputStyle: React.CSSProperties = { width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #4338ca', background: '#0f0a2e', color: 'white', marginBottom: '10px', fontSize: '14px' };
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      const urls: string[] = [];
+      for (const file of Array.from(files)) {
+        const path = `gifts/${p.id}/${Date.now()}_${file.name}`;
+        const storageRef = ref(storage, path);
+        await uploadBytes(storageRef, file);
+        const url = await getDownloadURL(storageRef);
+        urls.push(url);
+      }
+      setP(prev => ({ ...prev, images: [...prev.images, ...urls] }));
+    } catch (e) {
+      alert('حصل خطأ في رفع الصورة، حاول تاني');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <Overlay onClose={onClose}>
       <h2 style={{ color: '#fbbf24', fontWeight: 800, marginBottom: '12px' }}>{product.name ? 'تعديل هدية' : 'هدية جديدة'}</h2>
       <label style={{ color: '#c7d2fe', fontSize: '12px' }}>اسم الهدية</label>
       <input style={inputStyle} value={p.name} onChange={e => setP({ ...p, name: e.target.value })} placeholder="تيشيرت الخدمة" />
-      <label style={{ color: '#c7d2fe', fontSize: '12px' }}>رابط الصورة</label>
-      <input style={inputStyle} value={p.imageUrl} onChange={e => setP({ ...p, imageUrl: e.target.value })} placeholder="https://..." />
+
+      <label style={{ color: '#c7d2fe', fontSize: '12px' }}>الصور (تقدر ترفع أكتر من صورة للهدية الواحدة)</label>
+      {p.images.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+          {p.images.map((img, i) => (
+            <div key={i} style={{ position: 'relative', width: '60px', height: '60px' }}>
+              <img src={img} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }} />
+              <button onClick={() => setP(prev => ({ ...prev, images: prev.images.filter((_, idx) => idx !== i) }))}
+                style={{ position: 'absolute', top: '-6px', right: '-6px', background: '#dc2626', border: 'none', borderRadius: '50%', width: '20px', height: '20px', color: 'white', fontSize: '11px', lineHeight: 1 }}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <label style={{
+        display: 'block', textAlign: 'center', padding: '14px', marginBottom: '10px', borderRadius: '10px',
+        border: '2px dashed #4338ca', color: '#a5b4fc', fontWeight: 700, fontSize: '13px', cursor: 'pointer',
+      }}>
+        {uploading ? 'جاري الرفع...' : '📷 اختر صور من الموبايل / الكمبيوتر'}
+        <input type="file" accept="image/*" multiple disabled={uploading} onChange={e => handleFiles(e.target.files)} style={{ display: 'none' }} />
+      </label>
+
       <label style={{ color: '#c7d2fe', fontSize: '12px' }}>تكلفة النقط</label>
       <input style={inputStyle} type="number" value={p.points} onChange={e => setP({ ...p, points: Number(e.target.value) || 0 })} />
       <label style={{ color: '#c7d2fe', fontSize: '12px' }}>المقاسات والكميات (مقاس:كمية، مفصولة بفاصلة)</label>
@@ -420,7 +493,7 @@ const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (
         placeholder="S:3, M:5, L:2"
       />
       <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-        <button onClick={() => onSave(p)} disabled={!p.name} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: '#f59e0b', color: '#1e1b4b', fontWeight: 800 }}>حفظ</button>
+        <button onClick={() => onSave(p)} disabled={!p.name || uploading} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: '#f59e0b', color: '#1e1b4b', fontWeight: 800 }}>حفظ</button>
         {product.name && <button onClick={onDelete} style={{ padding: '12px 16px', borderRadius: '10px', border: 'none', background: '#dc2626', color: 'white', fontWeight: 700 }}>حذف</button>}
         <button onClick={onClose} style={{ padding: '12px 16px', borderRadius: '10px', border: '1px solid #4338ca', background: 'transparent', color: '#c7d2fe' }}>إلغاء</button>
       </div>
@@ -537,6 +610,32 @@ const OrderForm: React.FC<{ product: Product; students: any[]; onClose: () => vo
         </>
       )}
     </Overlay>
+  );
+};
+
+// معاينة الصور بجودة كاملة مع تحميل
+const ImageGallery: React.FC<{ product: Product; onClose: () => void }> = ({ product, onClose }) => {
+  const [index, setIndex] = useState(0);
+  const images = product.images || [];
+  const current = images[index];
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 10001, background: 'rgba(0,0,0,0.92)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '16px', direction: 'rtl' }}>
+      <button onClick={onClose} style={{ position: 'absolute', top: '16px', left: '16px', background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '8px', color: 'white', width: '36px', height: '36px', fontSize: '18px' }}>✕</button>
+      <p style={{ color: 'white', fontWeight: 700, marginBottom: '10px' }}>{product.name} ({index + 1}/{images.length})</p>
+      <div onClick={e => e.stopPropagation()} style={{ maxWidth: '92vw', maxHeight: '65vh', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {images.length > 1 && (
+          <button onClick={() => setIndex(i => (i - 1 + images.length) % images.length)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '50%', color: 'white', width: '36px', height: '36px', fontSize: '18px', flexShrink: 0 }}>‹</button>
+        )}
+        <img src={current} style={{ maxWidth: '100%', maxHeight: '65vh', borderRadius: '12px', objectFit: 'contain' }} />
+        {images.length > 1 && (
+          <button onClick={() => setIndex(i => (i + 1) % images.length)} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '50%', color: 'white', width: '36px', height: '36px', fontSize: '18px', flexShrink: 0 }}>›</button>
+        )}
+      </div>
+      <a href={current} download onClick={e => e.stopPropagation()}
+        style={{ marginTop: '14px', background: '#f59e0b', color: '#1e1b4b', fontWeight: 800, padding: '10px 20px', borderRadius: '10px', textDecoration: 'none', fontSize: '14px' }}>
+        ⬇ تحميل الصورة
+      </a>
+    </div>
   );
 };
 
