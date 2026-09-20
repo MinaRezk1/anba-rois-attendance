@@ -9,7 +9,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.11';
+const APP_VERSION = '2026.09.19.9';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -154,11 +154,6 @@ const getRosterGrade = (name) => ROSTER_GRADE_BY_KEY.get(normalizeRosterStudentN
 const getStudentTotalPoints = (student) => (
     Number(student?.points || 0) + Number(student?.previousYearsPoints || 0)
 );
-
-const DEFAULT_SHOP_DATA = { products: [], orders: [] };
-const normalizePhoneDigits = (value) => String(value || '').replace(/\D/g, '');
-const getShopProductImage = (product) => product?.imageUrl || '';
-const getShopOrderStatusLabel = (status) => ({ reserved: 'محجوز', delivered: 'تم التسليم', cancelled: 'ملغي' }[status] || status || 'محجوز');
 
 const CURRENT_ROSTER_MIGRATION_VERSION = '2026-09-19-84-v8';
 
@@ -1392,17 +1387,6 @@ const App = () => {
     const [editingStudent, setEditingStudent] = useState(null); // Now supports { id, phone, name }
     const [searchTerm, setSearchTerm] = useState('');
     const [activeView, setActiveView] = useState('students'); // 'students', 'leaderboard', or 'attendance_summary'
-    const [shopData, setShopData] = useState(DEFAULT_SHOP_DATA);
-    const [shopStudentId, setShopStudentId] = useState('');
-    const [shopPhoneLast4, setShopPhoneLast4] = useState('');
-    const [shopVerifiedStudentId, setShopVerifiedStudentId] = useState('');
-    const [shopProductName, setShopProductName] = useState('');
-    const [shopProductDescription, setShopProductDescription] = useState('');
-    const [shopProductCost, setShopProductCost] = useState('');
-    const [shopProductStock, setShopProductStock] = useState('');
-    const [shopProductImageUrl, setShopProductImageUrl] = useState('');
-    const [shopEditingProductId, setShopEditingProductId] = useState(null);
-
     const [studentToDelete, setStudentToDelete] = useState(null);
     const [pointToDelete, setPointToDelete] = useState(null);
     const [expandedDate, setExpandedDate] = useState(null); // For stats expansion
@@ -1649,21 +1633,9 @@ const App = () => {
 
 
 
-        const unsubShop = onSnapshot(doc(db, 'appData', 'shop_v1'), (docSnap) => {
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                setShopData({
-                    products: Array.isArray(data?.products) ? data.products : [],
-                    orders: Array.isArray(data?.orders) ? data.orders : [],
-                });
-            } else {
-                setShopData(DEFAULT_SHOP_DATA);
-            }
-        });
         return () => {
             unsubStudents();
             unsubAdmins();
-            unsubShop();
         };
     }, []);
 
@@ -1714,64 +1686,6 @@ const App = () => {
         setToastMessage(message);
         setTimeout(() => setToastMessage(null), 3000);
     }, []);
-
-
-    const saveShopData = useCallback((newShopData) => {
-        const normalized = { products: Array.isArray(newShopData?.products) ? newShopData.products : [], orders: Array.isArray(newShopData?.orders) ? newShopData.orders : [] };
-        setShopData(normalized);
-        setDoc(doc(db, 'appData', 'shop_v1'), normalized, { merge: true }).catch(err => console.error('Error saving shop data:', err));
-    }, []);
-
-    const resetShopProductForm = useCallback(() => {
-        setShopProductName(''); setShopProductDescription(''); setShopProductCost(''); setShopProductStock(''); setShopProductImageUrl(''); setShopEditingProductId(null);
-    }, []);
-
-    const handleSaveShopProduct = useCallback(() => {
-        if (!isMinaAdmin) return showToast('إدارة المتجر متاحة لمينا فقط.');
-        const name = shopProductName.trim(), cost = Math.floor(Number(shopProductCost)), stock = Math.max(0, Math.floor(Number(shopProductStock || 0)));
-        if (!name || !Number.isFinite(cost) || cost <= 0) return showToast('اكتب اسم الهدية وتكلفة صحيحة بالنقاط.');
-        const product = { id: shopEditingProductId || generateId(), name, description: shopProductDescription.trim(), cost, stock, imageUrl: shopProductImageUrl.trim(), active: true, updatedAt: new Date().toISOString() };
-        const products = shopEditingProductId ? shopData.products.map(p => p.id === shopEditingProductId ? { ...p, ...product } : p) : [product, ...shopData.products];
-        saveShopData({ ...shopData, products }); resetShopProductForm();
-        showToast(shopEditingProductId ? '✅ تم تعديل الهدية.' : '🎁 تم إضافة الهدية للمتجر.');
-    }, [isMinaAdmin, shopProductName, shopProductDescription, shopProductCost, shopProductStock, shopProductImageUrl, shopEditingProductId, shopData, saveShopData, resetShopProductForm, showToast]);
-
-    const handleDeleteShopProduct = useCallback((productId) => {
-        if (!isMinaAdmin || !window.confirm('حذف الهدية من المتجر؟')) return;
-        saveShopData({ ...shopData, products: shopData.products.filter(p => p.id !== productId) }); showToast('تم حذف الهدية من المتجر.');
-    }, [isMinaAdmin, shopData, saveShopData, showToast]);
-
-    const verifyShopStudent = useCallback(() => {
-        const student = students.find(s => s.id === shopStudentId), last4 = normalizePhoneDigits(shopPhoneLast4);
-        if (!student || last4.length !== 4) return showToast('اختار اسمك واكتب آخر 4 أرقام من رقم موبايلك.');
-        const phone = normalizePhoneDigits(student.phone);
-        if (!phone || phone.slice(-4) !== last4) return showToast('❌ البيانات غير مطابقة لرقم الموبايل المسجل.');
-        setShopVerifiedStudentId(student.id); setShopPhoneLast4(''); showToast('✅ تم الدخول للمتجر.');
-    }, [students, shopStudentId, shopPhoneLast4, showToast]);
-
-    const handleReserveShopProduct = useCallback((product) => {
-        const student = students.find(s => s.id === shopVerifiedStudentId);
-        if (!student) return showToast('سجل دخولك للمتجر الأول.');
-        if (!product?.active || Number(product.stock || 0) <= 0) return showToast('الهدية غير متاحة حالياً.');
-        const cost = Number(product.cost || 0);
-        if (Number(student.points || 0) < cost) return showToast('❌ رصيد النقاط الحالي غير كافي.');
-        const order = { id: generateId(), studentId: student.id, studentName: student.name, productId: product.id, productName: product.name, cost, status: 'reserved', createdAt: new Date().toISOString() };
-        const updatedStudents = students.map(s => s.id === student.id ? { ...s, points: Math.max(0, Number(s.points || 0) - cost), attendanceHistory: [{ id: generateId(), date: getCairoDateKey(), points: -cost, type: 'exchange', typeName: 'حجز من متجر الهدايا', description: 'حجز: ' + product.name, recordedBy: 'متجر الهدايا', recordedAt: new Date().toISOString() }, ...(s.attendanceHistory || [])] } : s);
-        saveStudentsData(updatedStudents);
-        saveShopData({ ...shopData, products: shopData.products.map(p => p.id === product.id ? { ...p, stock: Math.max(0, Number(p.stock || 0) - 1) } : p), orders: [order, ...(shopData.orders || [])] });
-        showToast('🎁 تم حجز ' + product.name + ' وخصم ' + cost + ' نقطة من رصيدك الحالي.');
-    }, [students, shopVerifiedStudentId, shopData, saveStudentsData, saveShopData, showToast]);
-
-    const handleShopOrderStatus = useCallback((orderId, nextStatus) => {
-        if (!isMinaAdmin) return;
-        const order = (shopData.orders || []).find(o => o.id === orderId);
-        if (!order || order.status === nextStatus) return;
-        if (nextStatus === 'cancelled' && order.status !== 'cancelled') {
-            saveStudentsData(students.map(s => s.id === order.studentId ? { ...s, points: Number(s.points || 0) + Number(order.cost || 0) } : s));
-        }
-        saveShopData({ ...shopData, orders: (shopData.orders || []).map(o => o.id === orderId ? { ...o, status: nextStatus, updatedAt: new Date().toISOString() } : o) });
-        showToast(nextStatus === 'cancelled' ? 'تم إلغاء الحجز ورد النقاط للشاب.' : 'تم تحديث حالة الحجز.');
-    }, [isMinaAdmin, shopData, students, saveStudentsData, saveShopData, showToast]);
 
     // Automatic migration of older local storage versions (v7, v6, v5)
     useEffect(() => {
@@ -2964,7 +2878,6 @@ const App = () => {
                         >
                             🔄
                         </button>
-                        <button type="button" onClick={() => setActiveView('shop')} className={`relative p-2 rounded-full transition-all ${activeView === 'shop' ? 'bg-emerald-500 text-white ring-2 ring-emerald-300' : 'bg-indigo-800 hover:bg-indigo-700 text-white'}`} title="متجر الهدايا" aria-label="متجر الهدايا">🛍️</button>
                         {isMinaAdmin && (
                             <button 
                                 onClick={() => setActiveView('badge_alerts')}
@@ -3068,9 +2981,6 @@ const App = () => {
                             <UserGroupIcon className="w-5 h-5" />
                             <span className="whitespace-nowrap">شباب الأنبا رويس ({students.length})</span>
                         </button>
-                        <button onClick={() => setActiveView('shop')} className={`flex-1 min-w-[120px] text-center rounded-lg py-2 font-bold flex items-center justify-center gap-2 transition-colors ${activeView === 'shop' ? 'bg-emerald-600 text-white' : 'text-indigo-300 hover:bg-indigo-800/50'}`}>
-                            <span className="text-xl">🛍️</span><span className="whitespace-nowrap">متجر الهدايا</span>
-                        </button>
                          <button onClick={() => setActiveView('leaderboard')} className={`flex-1 min-w-[120px] text-center rounded-lg py-2 font-bold flex items-center justify-center gap-2 transition-colors ${activeView === 'leaderboard' ? 'bg-indigo-700 text-amber-400' : 'text-indigo-300 hover:bg-indigo-800/50'}`}>
                              <TrophyIcon className="w-5 h-5" />
                              <span className="whitespace-nowrap">Leaders Board</span>
@@ -3100,71 +3010,6 @@ const App = () => {
                             <span className="whitespace-nowrap">سجل الاجتماعات</span>
                         </button>
                     </div>
-
-
-                    {activeView === 'shop' && (
-                        <div className="space-y-5 animate-fade-in-out" dir="rtl">
-                            <div className="bg-gradient-to-br from-emerald-950/80 via-indigo-950/80 to-indigo-900/70 border border-emerald-500/30 rounded-2xl p-5 shadow-lg">
-                                <h2 className="text-2xl font-black text-white">🛍️ متجر الهدايا</h2>
-                                <p className="text-xs text-emerald-200/80 mt-1">الهدايا تتحدد بالنقاط الحالية فقط.</p>
-                                {!shopVerifiedStudentId ? (
-                                    <div className="mt-5 bg-indigo-950/60 border border-indigo-800/60 rounded-2xl p-4 space-y-3">
-                                        <div className="text-sm font-black text-amber-300">👤 دخول الشاب</div>
-                                        <p className="text-xs text-indigo-300">اختار اسمك واكتب آخر 4 أرقام من الموبايل المسجل.</p>
-                                        <select value={shopStudentId} onChange={e => setShopStudentId(e.target.value)} className="w-full bg-indigo-900 text-white border border-indigo-700 rounded-xl p-3">
-                                            <option value="">اختار اسمك</option>{students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                        </select>
-                                        <input type="tel" inputMode="numeric" maxLength={4} value={shopPhoneLast4} onChange={e => setShopPhoneLast4(e.target.value.replace(/\D/g, '').slice(0,4))} placeholder="آخر 4 أرقام من الموبايل" className="w-full bg-indigo-900 text-white border border-indigo-700 rounded-xl p-3" />
-                                        <button onClick={verifyShopStudent} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-black py-3 rounded-xl">دخول المتجر 🛍️</button>
-                                    </div>
-                                ) : (() => {
-                                    const shopStudent = students.find(s => s.id === shopVerifiedStudentId);
-                                    if (!shopStudent) return null;
-                                    const myOrders = (shopData.orders || []).filter(o => o.studentId === shopStudent.id);
-                                    return <div className="mt-5 space-y-4">
-                                        <div className="bg-indigo-950/60 border border-emerald-500/20 rounded-2xl p-4 flex justify-between items-center gap-3">
-                                            <div><div className="text-xs text-indigo-300">أهلاً</div><div className="font-black text-white text-lg">{shopStudent.name}</div></div>
-                                            <div className="text-right"><div className="text-xs text-indigo-300">النقاط الحالية</div><div className="text-2xl font-black text-emerald-300">{shopStudent.points || 0}</div></div>
-                                            <button onClick={() => setShopVerifiedStudentId('')} className="text-xs text-rose-300 border border-rose-500/30 px-3 py-2 rounded-xl">خروج</button>
-                                        </div>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                            {(shopData.products || []).filter(p => p.active !== false).map(product => (
-                                                <div key={product.id} className="bg-indigo-950/70 border border-indigo-800/60 rounded-2xl overflow-hidden">
-                                                    {getShopProductImage(product) ? <img src={getShopProductImage(product)} alt={product.name} className="w-full h-44 object-cover" /> : <div className="w-full h-44 bg-gradient-to-br from-emerald-500/20 to-indigo-800/50 flex items-center justify-center text-6xl">🎁</div>}
-                                                    <div className="p-4">
-                                                        <div className="flex justify-between gap-2"><h3 className="font-black text-white text-lg">{product.name}</h3><span className="text-emerald-300 font-black whitespace-nowrap">{product.cost} نقطة</span></div>
-                                                        <p className="text-xs text-indigo-300 mt-2 min-h-[36px]">{product.description || 'هدية من متجر اجتماع الأنبا رويس'}</p>
-                                                        <div className="flex justify-between items-center mt-4 gap-2"><span className="text-xs text-indigo-400">{Number(product.stock || 0) > 0 ? 'متاح: ' + product.stock : 'نفدت الكمية'}</span><button disabled={Number(product.stock || 0) <= 0 || Number(shopStudent.points || 0) < Number(product.cost || 0)} onClick={() => handleReserveShopProduct(product)} className="bg-emerald-500 hover:bg-emerald-400 disabled:bg-indigo-800 disabled:text-indigo-500 text-white font-black px-4 py-2.5 rounded-xl text-xs">حجز الهدية 🎁</button></div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                        <div className="bg-indigo-950/60 border border-indigo-800/60 rounded-2xl p-4"><h3 className="font-black text-white mb-3">حجوزاتي</h3>{myOrders.length ? myOrders.slice(0,10).map(o => <div key={o.id} className="flex justify-between bg-indigo-900/60 rounded-xl p-3 mb-2 text-sm"><span className="text-white font-bold">{o.productName}</span><span className="text-amber-300">{getShopOrderStatusLabel(o.status)}</span></div>) : <p className="text-xs text-indigo-400">مفيش حجوزات لسه.</p>}</div>
-                                    </div>;
-                                })()}
-                            </div>
-
-                            {isMinaAdmin && (
-                                <div className="space-y-4">
-                                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4">
-                                        <h3 className="font-black text-amber-300 text-lg mb-3">⚙️ إدارة المتجر — مينا فقط</h3>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                            <input value={shopProductName} onChange={e => setShopProductName(e.target.value)} placeholder="اسم الهدية" className="bg-indigo-950 border border-indigo-700 rounded-xl p-3 text-white" />
-                                            <input type="number" min="1" value={shopProductCost} onChange={e => setShopProductCost(e.target.value)} placeholder="تكلفة الهدية بالنقاط" className="bg-indigo-950 border border-indigo-700 rounded-xl p-3 text-white" />
-                                            <input type="number" min="0" value={shopProductStock} onChange={e => setShopProductStock(e.target.value)} placeholder="الكمية المتاحة" className="bg-indigo-950 border border-indigo-700 rounded-xl p-3 text-white" />
-                                            <input value={shopProductImageUrl} onChange={e => setShopProductImageUrl(e.target.value)} placeholder="رابط صورة الهدية (اختياري)" className="bg-indigo-950 border border-indigo-700 rounded-xl p-3 text-white" />
-                                            <textarea value={shopProductDescription} onChange={e => setShopProductDescription(e.target.value)} placeholder="وصف الهدية" className="md:col-span-2 bg-indigo-950 border border-indigo-700 rounded-xl p-3 text-white min-h-[80px]" />
-                                        </div>
-                                        <button onClick={handleSaveShopProduct} className="mt-3 bg-amber-500 hover:bg-amber-400 text-indigo-950 font-black px-5 py-2.5 rounded-xl">{shopEditingProductId ? 'حفظ التعديل' : 'إضافة الهدية'} 🎁</button>
-                                    </div>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        {(shopData.products || []).map(p => <div key={p.id} className="bg-indigo-950/70 border border-indigo-800/60 rounded-2xl p-4"><div className="flex justify-between gap-2"><b className="text-white">{p.name}</b><span className="text-emerald-300">{p.cost} نقطة</span></div><p className="text-xs text-indigo-400 mt-1">المخزون: {p.stock}</p><div className="flex gap-2 mt-3"><button onClick={() => {setShopEditingProductId(p.id);setShopProductName(p.name);setShopProductDescription(p.description || '');setShopProductCost(String(p.cost));setShopProductStock(String(p.stock));setShopProductImageUrl(p.imageUrl || '');}} className="text-xs bg-indigo-800 text-white px-3 py-2 rounded-lg">تعديل</button><button onClick={() => handleDeleteShopProduct(p.id)} className="text-xs bg-rose-700 text-white px-3 py-2 rounded-lg">حذف</button></div></div>)}
-                                    </div>
-                                    <div className="bg-indigo-950/70 border border-indigo-800/60 rounded-2xl p-4"><h3 className="font-black text-white text-lg mb-3">📦 الحجوزات</h3>{(shopData.orders || []).map(o => <div key={o.id} className="bg-indigo-900/60 rounded-xl p-3 mb-2 flex flex-wrap justify-between gap-2"><div><b className="text-white">{o.productName}</b><div className="text-xs text-indigo-300">{o.studentName} • {o.cost} نقطة • {new Date(o.createdAt).toLocaleString('ar-EG')}</div></div><div className="flex gap-2 items-center"><span className="text-xs text-amber-300">{getShopOrderStatusLabel(o.status)}</span>{o.status === 'reserved' && <><button onClick={() => handleShopOrderStatus(o.id,'delivered')} className="text-xs bg-emerald-600 text-white px-3 py-2 rounded-lg">تم التسليم</button><button onClick={() => handleShopOrderStatus(o.id,'cancelled')} className="text-xs bg-rose-600 text-white px-3 py-2 rounded-lg">إلغاء ورد النقاط</button></>}</div></div>)}</div>
-                                </div>
-                            )}
-                        </div>
-                    )}
 
                     {activeView === 'students' && (
                         <div>
@@ -3213,7 +3058,7 @@ const App = () => {
                                                         </button>
                                                     )}
                                                     <div className="mt-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-400/30 text-center whitespace-nowrap">
-                                                        <div className="text-[9px] text-emerald-200 font-black leading-none">TOTAL POINTS (السابق + الحالي)</div>
+                                                        <div className="text-[9px] text-emerald-200 font-black leading-none">TOTAL POINTS</div>
                                                         <div className="text-lg text-emerald-300 font-black leading-tight">
                                                             {getStudentTotalPoints(student)}
                                                         </div>
@@ -4798,3 +4643,153 @@ const App = () => {
                             <span className="text-amber-400 font-bold text-sm shrink-0">نقطة</span>
                         </div>
                     </div>
+
+                    {/* Date Field (Defaults to First Friday of following month) */}
+                    <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                            <label className="text-xs text-indigo-300 font-bold">تاريخ تسجيل المكافأة:</label>
+                            <span className="text-[11px] text-amber-300 font-semibold bg-amber-400/15 px-2 py-0.5 rounded border border-amber-400/30">
+                                📅 أول جمعة في الشهر التالي ({rewardDate})
+                            </span>
+                        </div>
+                        <input
+                            type="date"
+                            value={rewardDate}
+                            onChange={(e) => setRewardDate(e.target.value)}
+                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-sm focus:outline-none focus:border-amber-400 font-mono"
+                        />
+                        <p className="text-[11px] text-indigo-300 mt-1">
+                            تم ضبط التاريخ تلقائياً على أول جمعة في الشهر التالي ({rewardDate}) ويمكنك تغييره يدوياً إذا رغبت.
+                        </p>
+                    </div>
+
+                    {/* Description / Reason */}
+                    <div>
+                        <label className="block text-xs text-indigo-300 font-bold mb-1.5">البيان / الوصف (يظهر في سجل الشاب):</label>
+                        <input
+                            type="text"
+                            value={rewardCustomDesc}
+                            onChange={(e) => setRewardCustomDesc(e.target.value)}
+                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-sm focus:outline-none focus:border-amber-400"
+                        />
+                    </div>
+
+                    <div className="pt-2 flex gap-3">
+                        <button
+                            type="button"
+                            onClick={handleGrantMonthlyChampionReward}
+                            className="flex-1 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-indigo-950 font-black py-3 rounded-xl transition-all shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 text-sm md:text-base"
+                        >
+                            <span>🏆</span>
+                            <span>إضافة المكافأة للشاب الآن</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setMonthlyChampionModalOpen(false)}
+                            className="bg-indigo-800 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition-colors text-sm"
+                        >
+                            إلغاء
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* --- Manual Badges Reward Modal --- */}
+            <Modal
+                isOpen={isBadgeRewardModalOpen && !!badgeRewardStudent}
+                onClose={() => setBadgeRewardModalOpen(false)}
+                title={`🎖️ منح مكافأة تجميع الأوسمة لـ (${badgeRewardStudent?.name})`}
+            >
+                <div className="space-y-4 text-right font-sans" dir="rtl">
+                    <div className="bg-purple-500/10 border border-purple-500/30 p-3 rounded-xl">
+                        <p className="text-xs text-purple-200 leading-relaxed font-semibold">
+                            ✨ تجميع الأوسمة يتم مكافأته يدويًا من خلالك. حدد عدد النقاط والتاريخ الذي ترغب في إضافته للشاب.
+                        </p>
+                    </div>
+
+                    {/* Points Presets */}
+                    <div>
+                        <label className="block text-xs text-indigo-300 font-bold mb-1.5">عدد النقاط الممنوحة:</label>
+                        <div className="flex gap-2 mb-2">
+                            {['15', '20', '25', '30'].map(pts => (
+                                <button
+                                    key={pts}
+                                    type="button"
+                                    onClick={() => setBadgeRewardPoints(pts)}
+                                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${badgeRewardPoints === pts ? 'bg-purple-500 text-white font-black shadow' : 'bg-indigo-900/60 text-indigo-200 hover:bg-indigo-800'}`}
+                                >
+                                    +{pts} نقطة
+                                </button>
+                            ))}
+                        </div>
+                        <input
+                            type="number"
+                            min="1"
+                            value={badgeRewardPoints}
+                            onChange={(e) => setBadgeRewardPoints(e.target.value)}
+                            placeholder="عدد النقاط"
+                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-base font-bold text-center focus:outline-none focus:border-purple-400"
+                        />
+                    </div>
+
+                    {/* Date */}
+                    <div>
+                        <label className="block text-xs text-indigo-300 font-bold mb-1.5">تاريخ تسجيل المكافأة:</label>
+                        <input
+                            type="date"
+                            value={badgeRewardDate}
+                            onChange={(e) => setBadgeRewardDate(e.target.value)}
+                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-sm focus:outline-none focus:border-purple-400 font-mono"
+                        />
+                    </div>
+
+                    {/* Description */}
+                    <div>
+                        <label className="block text-xs text-indigo-300 font-bold mb-1.5">البيان / الوصف:</label>
+                        <input
+                            type="text"
+                            value={badgeRewardDesc}
+                            onChange={(e) => setBadgeRewardDesc(e.target.value)}
+                            className="w-full bg-indigo-950 border border-indigo-700 text-white rounded-lg p-2.5 text-sm focus:outline-none focus:border-purple-400"
+                        />
+                    </div>
+
+                    <div className="pt-2 flex gap-3">
+                        <button type="button" onClick={handleGrantBadgeReward} className="flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black py-3 rounded-xl transition-all shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 text-sm md:text-base">
+                            <span>🎖️</span><span>إضافة مكافأة الأوسمة الآن</span>
+                        </button>
+                        <button type="button" onClick={() => setBadgeRewardModalOpen(false)} className="bg-indigo-800 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl transition-colors text-sm">إلغاء</button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* --- Mina Only Leaderboard Points & Money Control Modal --- */}
+            <Modal
+                isOpen={!!studentForPointsEdit && isMinaAdmin}
+                onClose={() => setStudentForPointsEdit(null)}
+                title="التحكم بالنواحي والفلوس (خاص بالخادم مينا) ⚖️"
+            >
+                {studentForPointsEdit && (
+                    <div className="space-y-5 text-right font-sans" dir="rtl">
+                        <div className="bg-indigo-950/80 p-4 rounded-xl border border-indigo-800/60 flex items-center justify-between">
+                            <div><h3 className="font-black text-amber-400 text-base md:text-lg">{studentForPointsEdit.name}</h3><p className="text-xs text-indigo-300 mt-0.5">تعديل رصيد النقاط والفلوس في لوحة الصدارة</p></div>
+                            <div className="bg-amber-500/20 text-amber-300 px-3.5 py-2 rounded-xl border border-amber-500/30 text-xs font-black shadow-inner">الرصيد الحالي: {studentForPointsEdit.pointsForLeaderboard ?? studentForPointsEdit.points ?? 0} نقطة | {getStudentMoney(studentForPointsEdit)} جنيه</div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40"><label className="block text-xs font-bold text-amber-300 mb-2">عدد النقاط المطلوب 🎯</label><div className="relative"><input type="number" value={targetPointsInput} onChange={(e) => handlePointsInputChange(e.target.value)} placeholder="مثال: 100" className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right" /><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">نقطة</span></div></div>
+                            <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40"><label className="block text-xs font-bold text-amber-300 mb-2">القيمة بالجنيه 💰 (مستقلة تماماً)</label><div className="relative"><input type="number" value={targetMoneyInput} onChange={(e) => handleMoneyInputChange(e.target.value)} placeholder="مثال: 50" className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right" /><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">جنيه</span></div></div>
+                        </div>
+                        <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-xl text-xs text-amber-200/90 leading-relaxed">💡 <span className="font-bold text-amber-300">تنويه:</span> النقاط والجنيهات منفصلان تماماً. يمكنك إدخال أي عدد نقاط وأي مبلغ بالجنيه بشكل مستقل دون تأثر إحداهما بالأخرى.</div>
+                        <div className="flex gap-3 pt-2">
+                            <button onClick={handleSavePointsEdit} className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-indigo-950 font-black py-3 rounded-xl transition-all text-sm shadow-md active:scale-[0.98]">حفظ التغييرات 💾</button>
+                            <button onClick={() => setStudentForPointsEdit(null)} className="px-5 bg-indigo-900 hover:bg-indigo-800 text-indigo-200 font-bold py-3 rounded-xl transition-all text-sm">إلغاء</button>
+                        </div>
+                    </div>
+                )}
+            </Modal>
+
+        </div>
+    );
+};
+
+export default App;
