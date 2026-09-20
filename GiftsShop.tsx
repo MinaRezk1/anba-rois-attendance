@@ -124,8 +124,14 @@ const GiftsShopWidget: React.FC = () => {
   }, [isAdmin]);
 
   const saveShop = async (next: ShopData) => {
-    setShop(next);
-    await setDoc(SHOP_DOC, next);
+    const prev = shop;
+    setShop(next); // تحديث فوري للشكل، بس هنرجعه لو الحفظ الحقيقي فشل
+    try {
+      await setDoc(SHOP_DOC, next);
+    } catch (err: any) {
+      setShop(prev); // رجّع الحالة القديمة عشان الشاشة متوريش حاجة مش محفوظة فعليًا
+      alert('فشل الحفظ في قاعدة البيانات: ' + (err?.message || 'خطأ غير معروف') + '\n\nتأكد من قواعد الأمان (Firestore Rules) وحاول تاني.');
+    }
   };
 
   return (
