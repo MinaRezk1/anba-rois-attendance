@@ -1,0 +1,24 @@
+{
+  "short_name": "Points ثانوي",
+  "name": "Points ثانوي بنين - اجتماع الأنبا رويس",
+  "description": "تطبيق تسجيل حضور وغياب وحصول نقاط ثانوي بنين اجتماع الأنبا رويس",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "./",
+  "background_color": "#1e1b4b",
+  "theme_color": "#1e1b4b",
+  "display": "standalone",
+  "orientation": "portrait"
+}
