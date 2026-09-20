@@ -76,6 +76,13 @@ const GiftsShopWidget: React.FC = () => {
     return () => window.removeEventListener('mina-admin-status', handler);
   }, []);
 
+  // فتح المتجر من زرار الهدية في الهيدر الرئيسي (خاص بمينا)
+  useEffect(() => {
+    const openHandler = () => setOpen(true);
+    window.addEventListener('open-gifts-shop', openHandler);
+    return () => window.removeEventListener('open-gifts-shop', openHandler);
+  }, []);
+
   // اطلب إذن التنبيهات من المتصفح مرة واحدة لما يبقى مينا داخل، عشان يوصله تنبيه لما حد يحجز
   useEffect(() => {
     if (isAdmin && 'Notification' in window && Notification.permission === 'default') {
@@ -106,6 +113,7 @@ const GiftsShopWidget: React.FC = () => {
         products: Array.isArray(data.products) ? data.products : [],
         orders,
       });
+      window.dispatchEvent(new CustomEvent('gifts-pending-count', { detail: orders.filter(o => o.status === 'reserved').length }));
       setLoading(false);
     }, () => setLoading(false));
     const unsubStudents = onSnapshot(STUDENTS_DOC, (snap) => {
@@ -122,7 +130,8 @@ const GiftsShopWidget: React.FC = () => {
 
   return (
     <>
-      {/* الزرار العائم */}
+      {/* الزرار العائم - ظاهر للأولاد عشان يطلبوا هدايا، مخفي عند مينا لأن عنده زرار مخصص فوق */}
+      {!isAdmin && (
       <button
         onClick={() => setOpen(true)}
         style={{
@@ -135,19 +144,9 @@ const GiftsShopWidget: React.FC = () => {
         }}
         aria-label="الهدايا"
       >
-        <span style={{ position: 'relative', display: 'inline-block' }}>
         🎁
-        {isAdmin && shop.orders.filter(o => o.status === 'reserved').length > 0 && (
-          <span style={{
-            position: 'absolute', top: '-10px', right: '-14px', background: '#dc2626', color: 'white',
-            borderRadius: '50%', minWidth: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: '11px', fontWeight: 800, border: '2px solid #1e1b4b',
-          }}>
-            {shop.orders.filter(o => o.status === 'reserved').length}
-          </span>
-        )}
-        </span>
       </button>
+      )}
 
       {open && (
         <div

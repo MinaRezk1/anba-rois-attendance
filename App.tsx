@@ -2666,6 +2666,13 @@ const App = () => {
         window.dispatchEvent(new CustomEvent('mina-admin-status', { detail: isMinaAdmin }));
     }, [isMinaAdmin]);
 
+    const [giftsPendingCount, setGiftsPendingCount] = useState(0);
+    useEffect(() => {
+        const handler = (e) => setGiftsPendingCount(e.detail || 0);
+        window.addEventListener('gifts-pending-count', handler);
+        return () => window.removeEventListener('gifts-pending-count', handler);
+    }, []);
+
     const openMonthlyChampionModal = (preselectedStudentId = '', defaultRank = 'المركز الأول', defaultPts = '20', monthType = 'prev') => {
         setRewardTargetMonth(monthType);
         
@@ -2902,6 +2909,21 @@ const App = () => {
                                 {pendingBadgesCount > 0 && (
                                     <span className="absolute -top-1.5 -right-1.5 bg-gradient-to-r from-red-500 to-rose-600 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center shadow-lg border-2 border-indigo-950 animate-bounce">
                                         {pendingBadgesCount}
+                                    </span>
+                                )}
+                            </button>
+                        )}
+                        {isMinaAdmin && (
+                            <button
+                                onClick={() => window.dispatchEvent(new CustomEvent('open-gifts-shop'))}
+                                className="relative bg-indigo-800 hover:bg-indigo-700 text-white p-2 rounded-full transition-colors text-xl leading-none"
+                                title="متجر الهدايا"
+                                aria-label="متجر الهدايا"
+                            >
+                                🎁
+                                {giftsPendingCount > 0 && (
+                                    <span className="absolute -top-1.5 -right-1.5 bg-gradient-to-r from-red-500 to-rose-600 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center shadow-lg border-2 border-indigo-950">
+                                        {giftsPendingCount}
                                     </span>
                                 )}
                             </button>
