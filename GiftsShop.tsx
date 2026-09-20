@@ -573,7 +573,7 @@ const OrderForm: React.FC<{ product: Product; students: any[]; onClose: () => vo
       confirmationRef.current = result;
       setStep('code');
     } catch (e: any) {
-      setError('فشل إرسال الكود، تأكد إن الرقم صح وحاول تاني');
+      setError(`فشل إرسال الكود (${e?.code || 'خطأ'}): ${e?.message || 'حاول تاني'}`);
     } finally {
       setSending(false);
     }
