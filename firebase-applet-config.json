@@ -1,10 +1,10 @@
 {
-  "projectId": "cogent-tendril-ssjh2",
-  "appId": "1:874497292672:web:f4e45e3ccd5b3d035c6965",
-  "apiKey": "AIzaSyBH-UhmyGX6nqNF0hJekQXsOTQFsHbtL8I",
-  "authDomain": "cogent-tendril-ssjh2.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-8111236c-54a0-4684-b949-5159f0dc7fab",
-  "storageBucket": "cogent-tendril-ssjh2.firebasestorage.app",
-  "messagingSenderId": "874497292672",
+  "projectId": "attendance-rois",
+  "appId": "1:665929849181:web:0b6a995e3b62e674eeb0b4",
+  "apiKey": "AIzaSyAYMKZe9dS3HhVED3GLwaMKgRwQvodCgsw",
+  "authDomain": "attendance-rois.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "attendance-rois.firebasestorage.app",
+  "messagingSenderId": "665929849181",
   "measurementId": ""
 }
