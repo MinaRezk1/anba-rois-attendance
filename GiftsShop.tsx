@@ -392,7 +392,23 @@ const GiftsShopWidget: React.FC = () => {
                 newPrev -= remaining;
 
                 const newItems = [...items];
-                newItems[idx] = { ...liveStudent, points: newPoints, previousYearsPoints: newPrev };
+                const cairoDateKey = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+                const historyRecord = {
+                  id: genId(),
+                  date: cairoDateKey,
+                  points: -orderingProduct.points,
+                  type: 'giftPurchase',
+                  typeName: 'شراء من متجر الهدايا',
+                  description: `${orderingProduct.name}${size && size !== 'عادي' ? ` (${size})` : ''}`,
+                  recordedBy: liveStudent.name,
+                  recordedAt: new Date().toISOString(),
+                };
+                newItems[idx] = {
+                  ...liveStudent,
+                  points: newPoints,
+                  previousYearsPoints: newPrev,
+                  attendanceHistory: [historyRecord, ...(liveStudent.attendanceHistory || [])],
+                };
 
                 const newProducts = shopNow.products.map(p => p.id !== product.id ? p : {
                   ...p, sizes: p.sizes.map(s => s.label === size ? { ...s, qty: s.qty - 1 } : s),
