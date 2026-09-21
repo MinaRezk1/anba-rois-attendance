@@ -361,7 +361,7 @@ const filterToApprovedRoster = (items) => Array.isArray(items)
             ...student,
             name: correctedName,
             ...(rosterGrade ? { grade: rosterGrade } : {}),
-            phone: rosterPhone !== undefined ? rosterPhone : (student.phone || ''),
+            phone: (student.phone && student.phone.trim()) ? student.phone : (rosterPhone !== undefined ? rosterPhone : ''),
         };
     })
     : [];
