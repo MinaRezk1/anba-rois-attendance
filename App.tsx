@@ -1537,18 +1537,15 @@ const App = () => {
                 const dbItems = docSnap.data()?.items;
                 if (Array.isArray(dbItems)) {
                     const approvedItems = filterToApprovedRoster(dbItems);
-                    const migrationKey = 'church_attendance_roster_migration_2026_09_19_84_v8';
-                    const migrationDone = localStorage.getItem(migrationKey) === 'done';
                     const storedMigrationVersion = docSnap.data()?.rosterMigrationVersion || '';
-                    const normalizedDbRoster = dbItems.map(s => normalizeRosterStudentName(s?.name)).filter(Boolean);
-                    const expectedRosterKeys = APPROVED_STUDENT_ROSTER_NAMES.map(normalizeRosterStudentName).filter((key, index, list) => list.indexOf(key) === index);
-                    const rosterMatchesExactly = normalizedDbRoster.length === expectedRosterKeys.length
-                        && normalizedDbRoster.every((key, index) => key === expectedRosterKeys[index]);
                     const needsSeasonReset = storedMigrationVersion !== CURRENT_ROSTER_MIGRATION_VERSION;
 
                     if (isRosterMigrationInProgress.current) return;
 
-                    if (!migrationDone && (needsSeasonReset || !rosterMatchesExactly || dbItems.length !== 84)) {
+                    // ملحوظة مهمة: الشرط ده بيتحدد بس من قيمة محفوظة في قاعدة البيانات نفسها (rosterMigrationVersion)
+                    // مش من أي حاجة متخزنة في المتصفح (localStorage) - عشان مسح بيانات الموقع أو تغيير الجهاز
+                    // ميعملش "ريسيت" تاني لنقط الطلاب بالغلط.
+                    if (needsSeasonReset) {
                         isRosterMigrationInProgress.current = true;
                         const exactRoster = buildExactCurrentRoster(dbItems);
                         setDoc(doc(db, 'appData', 'students_pre_roster_2026_backup'), {
@@ -1565,7 +1562,6 @@ const App = () => {
                                 const str = JSON.stringify(exactRoster);
                                 lastStudentsDB.current = str;
                                 localStorage.setItem('church_attendance_students_v8', str);
-                                localStorage.setItem(migrationKey, 'done');
                                 setStudents(exactRoster);
                                 showToast('✅ تم تحديث كشف الـ84 طالب وتصفير النقاط الحالية وترحيل النقاط القديمة.');
                             })
