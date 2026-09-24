@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.23.v11';
+const APP_VERSION = '2026.09.23.v12';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -1276,7 +1276,7 @@ const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = 
 };
 
 
-const defaultAdminsData = [{"id":"admin_mina_rizk","name":"مينا رزق","pin":"1218","isLocked":false,"failedAttempts":0,"isSuperAdmin":true},{"id":"admin_shady_sameh","name":"شادي سامح","pin":"2846","isLocked":false,"failedAttempts":0,"isSuperAdmin":false},{"id":"admin_mina_moawad","name":"مينا معوض","pin":"7520","isLocked":false,"failedAttempts":0,"isSuperAdmin":false},{"id":"admin_kirollos_raafat","name":"كيرلس رأفت","pin":"7117","isLocked":false,"failedAttempts":0,"isSuperAdmin":false},{"id":"admin_nagy_wiliam","name":"ناجي وليم","pin":"2846","isLocked":false,"failedAttempts":0,"isSuperAdmin":false}];
+const defaultAdminsData = [{"id": "admin_mina_rizk", "name": "مينا رزق", "pin": "pbkdf2$100000$ff1024c3314d991d32a611354d2266d7$5f5c8500dcf3122c8439c0eaa4ad351de1a5f35212bd6124a495417cbc824f60", "isLocked": false, "failedAttempts": 0, "isSuperAdmin": true}, {"id": "admin_shady_sameh", "name": "شادي سامح", "pin": "pbkdf2$100000$178dad37ca427baeb8b384d51ed7260a$310884f1703c51a29688404d0917df71f2bc11fdc6ff9d7dc3ff17994f8ef05f", "isLocked": false, "failedAttempts": 0, "isSuperAdmin": false}, {"id": "admin_mina_moawad", "name": "مينا معوض", "pin": "pbkdf2$100000$ab87994fa84a0f6d2b90858daf68d5c5$2e900ebec6803a8bf9eefa3963d488d7d4590033be9748903ebb906300ccd076", "isLocked": false, "failedAttempts": 0, "isSuperAdmin": false}, {"id": "admin_kirollos_raafat", "name": "كيرلس رأفت", "pin": "pbkdf2$100000$003045eefcef1fe01bb80aacb31664f7$883d70acf53589cc09e188e297417c3961fc79b39de68d05dfdfc461f93768fd", "isLocked": false, "failedAttempts": 0, "isSuperAdmin": false}, {"id": "admin_nagy_wiliam", "name": "ناجي وليم", "pin": "pbkdf2$100000$a4d6ddcb9fcb84958af13458d68314f1$4ae85c6a9b34616eb6d18c047a7111789e7f108463f131ddf38d4f8c55985290", "isLocked": false, "failedAttempts": 0, "isSuperAdmin": false}];
 
 const mergeStudentsData = (local, dbItems) => {
     if (!Array.isArray(local) || local.length === 0) return dbItems;
@@ -1342,6 +1342,32 @@ const mergeAdminsData = (local, dbItems) => {
         }
     });
     return Array.from(adminMap.values());
+};
+
+// ============================================================
+// حماية الأرقام السرية للخدام: بتتخزن "مشفّرة" (hash) بدل ما تتخزن زي ما هي،
+// فحتى لو حد قرا قاعدة البيانات أو الكود مش هيعرف الرقم السري الحقيقي.
+// ============================================================
+const PIN_HASH_PREFIX = 'pbkdf2$';
+const PIN_HASH_ITERATIONS = 100000;
+const bytesToHex = (buf) => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+const hexToBytes = (hex) => new Uint8Array((hex.match(/.{1,2}/g) || []).map(h => parseInt(h, 16)));
+const isHashedPin = (value) => typeof value === 'string' && value.startsWith(PIN_HASH_PREFIX);
+const derivePinHash = async (pin, saltBytes, iterations) => {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(String(pin)), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: saltBytes, iterations }, key, 256);
+    return bytesToHex(bits);
+};
+const hashPin = async (pin) => {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const hash = await derivePinHash(pin, salt, PIN_HASH_ITERATIONS);
+    return `${PIN_HASH_PREFIX}${PIN_HASH_ITERATIONS}$${bytesToHex(salt)}$${hash}`;
+};
+const verifyPin = async (pin, stored) => {
+    if (!isHashedPin(stored)) return String(pin) === String(stored); // رقم قديم لسه ماتشفّرش
+    const [, iterStr, saltHex, hashHex] = stored.split('$');
+    const hash = await derivePinHash(pin, hexToBytes(saltHex), Number(iterStr));
+    return hash === hashHex;
 };
 
 // ============================================================
@@ -1452,7 +1478,7 @@ const App = () => {
         }
         return [];
     });
-    const [admins, setAdmins] = useState(() => {
+    const [admins, setAdmins] = useState<any[]>(() => {
         const local = localStorage.getItem('church_attendance_admins_v8');
         if (local) {
             try {
@@ -1673,13 +1699,31 @@ const App = () => {
     const isInitialMount = useRef(true);
 
     const lastStudentsDB = useRef<string>(localStorage.getItem('church_attendance_students_v9') || '[]');
+    // مراقبة حجم بيانات الطلاب (الحد الأقصى لـFirebase 1 ميجا للمستند الواحد)
+    const [studentsDocBytes, setStudentsDocBytes] = useState(0);
     const lastAdminsDB = useRef<string>(localStorage.getItem('church_attendance_admins_v8') || '[]');
+    // تشفير تلقائي لأي رقم سري قديم لسه متخزن زي ما هو في قاعدة البيانات (بيحصل مرة واحدة)
+    useEffect(() => {
+        if (!Array.isArray(admins) || !admins.some(a => a && a.pin && !isHashedPin(a.pin))) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const upgraded = await Promise.all(admins.map(async a => (a && a.pin && !isHashedPin(a.pin)) ? { ...a, pin: await hashPin(a.pin) } : a));
+                if (!cancelled) setAdmins(upgraded);
+            } catch (err) {
+                console.error('PIN encryption upgrade failed:', err);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [admins]);
+
     const isRosterMigrationInProgress = useRef(false);
 
     // Initialize Data from Firebase with Offline-Resilient Merging
     useEffect(() => {
         const unsubStudents = onSnapshot(doc(db, 'appData', 'students_v9'), (docSnap) => {
             if (docSnap.exists()) {
+                try { setStudentsDocBytes(new Blob([JSON.stringify(docSnap.data())]).size); } catch (e) {}
                 const dbItems = docSnap.data()?.items;
                 if (Array.isArray(dbItems)) {
                     const approvedItems = filterToApprovedRoster(dbItems);
@@ -2047,7 +2091,7 @@ const App = () => {
         }
     }, [students, showToast]);
     
-    const handlePinSubmit = (e) => {
+    const handlePinSubmit = async (e) => {
         e.preventDefault();
         const adminToLogin = admins.find(a => a.id === selectedAdmin.id);
         if (!adminToLogin) {
@@ -2060,7 +2104,13 @@ const App = () => {
             return;
         }
 
-        if (pinInput === adminToLogin.pin) {
+        let pinOk = false;
+        try {
+            pinOk = await verifyPin(pinInput, adminToLogin.pin);
+        } catch (err) {
+            console.error('PIN verification failed:', err);
+        }
+        if (pinOk) {
             setLoggedInAdmin(adminToLogin);
             setAuthModalOpen(false);
             showToast(`أهلاً بك, ${adminToLogin.name}`);
@@ -2230,7 +2280,7 @@ const App = () => {
 
 
     // --- Super Admin Functions ---
-    const handleAddAdmin = () => {
+    const handleAddAdmin = async () => {
         const name = newAdminName.trim();
         const pin = newAdminPin.trim();
 
@@ -2238,8 +2288,8 @@ const App = () => {
             showToast("الرجاء إدخال اسم ورقم سري للخادم الجديد.");
             return;
         }
-        if (!/^\d{4,}$/.test(pin)) {
-            showToast("الرقم السري يجب أن يتكون من 4 أرقام على الأقل.");
+        if (!/^\d{6,}$/.test(pin)) {
+            showToast("الرقم السري يجب أن يتكون من 6 أرقام على الأقل.");
             return;
         }
         if (admins.some(a => a.name.toLowerCase() === name.toLowerCase())) {
@@ -2250,7 +2300,7 @@ const App = () => {
         const newAdmin = {
             id: `admin_${name.replace(/\s+/g, '_').toLowerCase()}_${generateId()}`,
             name: name,
-            pin: pin,
+            pin: await hashPin(pin),
             isLocked: false,
             failedAttempts: 0,
             isSuperAdmin: false
@@ -2288,12 +2338,13 @@ const App = () => {
         setEditingAdminPinValue('');
     };
 
-    const handleSaveAdminPin = (adminId) => {
-        if (!/^\d{4,}$/.test(editingAdminPinValue)) {
-            showToast("الرقم السري يجب أن يتكون من 4 أرقام على الأقل.");
+    const handleSaveAdminPin = async (adminId) => {
+        if (!/^\d{6,}$/.test(editingAdminPinValue)) {
+            showToast("الرقم السري يجب أن يتكون من 6 أرقام على الأقل.");
             return;
         }
-        setAdmins(prev => prev.map(a => a.id === adminId ? { ...a, pin: editingAdminPinValue } : a));
+        const hashed = await hashPin(editingAdminPinValue);
+        setAdmins(prev => prev.map(a => a.id === adminId ? { ...a, pin: hashed, failedAttempts: 0 } : a));
         showToast(`تم تغيير الرقم السري بنجاح.`);
         setEditingAdminId(null);
         setEditingAdminPinValue('');
@@ -2368,7 +2419,7 @@ const App = () => {
                     typeof admin.name === 'string' &&
                     admin.name.trim().length > 0 &&
                     typeof admin.pin === 'string' &&
-                    /^\d{4,}$/.test(admin.pin);
+                    (/^\d{4,}$/.test(admin.pin) || /^pbkdf2\$\d+\$[0-9a-f]+\$[0-9a-f]+$/.test(admin.pin));
 
                 if (data.students !== undefined) {
                     if (!Array.isArray(data.students) || !data.students.every(isValidStudent)) {
@@ -4919,6 +4970,11 @@ const App = () => {
                 )}
             </Modal>
 
+            {isSuperAdmin && studentsDocBytes > 700000 && (
+                <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 60, background: '#b91c1c', color: 'white', textAlign: 'center', fontSize: 13, fontWeight: 700, padding: '8px 12px' }}>
+                    ⚠️ بيانات الطلاب وصلت {Math.round(studentsDocBytes / 10485.76)}% من الحد الأقصى. حمّل نسخة احتياطية وكلّم المطوّر قريب عشان نوسّع المساحة.
+                </div>
+            )}
             <div style={{ position: 'fixed', bottom: 4, right: 8, fontSize: 10, opacity: 0.45, color: '#c7d2fe', zIndex: 1, pointerEvents: 'none', direction: 'ltr' }}>v{APP_VERSION}</div>
         </div>
     );
