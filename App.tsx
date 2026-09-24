@@ -1453,9 +1453,10 @@ const mergeStudentLists = (baseList, localList, remoteList) => {
 
 const STUDENTS_DOC_REF = () => doc(db, 'appData', 'students_v9');
 
-const commitListMerge = (docRef, baseList, localList) => runTransaction(db, async (tx) => {
-    const snap = await tx.get(docRef);
-    const remoteItems = snap.exists() && Array.isArray(snap.data()?.items) ? snap.data().items : null;
+const commitListMerge = (docRef: any, baseList: any[], localList: any[]) => runTransaction(db, async (tx) => {
+    const snap: any = await tx.get(docRef);
+    const snapData: any = snap.exists() ? snap.data() : null;
+    const remoteItems = snapData && Array.isArray(snapData.items) ? snapData.items : null;
     // لو القاعدة فاضية (أول مرة / بعد نقل)، اكتب النسخة المحلية زي ما هي
     const finalItems = remoteItems ? mergeStudentLists(baseList, localList, remoteItems) : localList;
     tx.set(docRef, { items: finalItems }, { merge: true });
