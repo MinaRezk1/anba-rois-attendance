@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.23.v13';
+const APP_VERSION = '2026.09.23.v14';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -360,7 +360,8 @@ const filterToApprovedRoster = (items) => Array.isArray(items)
         return {
             ...student,
             name: correctedName,
-            ...(rosterGrade ? { grade: rosterGrade } : {}),
+            // الصف المتسجل للطالب ليه الأولوية، والقايمة الثابتة بتستخدم بس لو مفيش صف متسجل
+            grade: (student.grade && String(student.grade).trim()) ? student.grade : (rosterGrade || student.grade || ''),
             phone: (student.phone && student.phone.trim()) ? student.phone : (rosterPhone !== undefined ? rosterPhone : ''),
         };
     })

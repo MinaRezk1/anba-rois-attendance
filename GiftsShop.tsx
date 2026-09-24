@@ -48,6 +48,9 @@ type Order = {
   points: number;
   status: 'reserved' | 'delivered' | 'cancelled';
   createdAt: string;
+  studentId?: string;       // الطلبات الجديدة بتحفظ رقم الطالب عشان لو الطلب اتلغى النقط ترجعله هو بالظبط
+  deductedCurrent?: number; // اتخصم كام من نقط السنة الحالية
+  deductedPrev?: number;    // واتخصم كام من نقط السنين اللي فاتت
 };
 type ShopData = { products: Product[]; orders: Order[] };
 
@@ -171,19 +174,76 @@ const GiftsShopWidget: React.FC = () => {
     return () => { unsub(); unsubStudents(); };
   }, [isAdmin]);
 
-  const saveShop = async (next: ShopData) => {
-    const prev = shop;
-    const approxBytes = new Blob([JSON.stringify(next)]).size;
-    if (approxBytes > 950000) {
-      alert('بيانات المتجر كبرت جدًا ومش هتتحفظ. غالبًا فيه هدايا قديمة بصور متخزنة بالطريقة القديمة: افتح الهدايا دي ودوس "حفظ" تاني عشان صورها تتنقل للمكان الجديد.');
-      return;
-    }
-    setShop(next); // تحديث فوري للشكل، بس هنرجعه لو الحفظ الحقيقي فشل
+  // كل تعديل على المتجر بيتعمل على آخر نسخة موجودة فعلًا في قاعدة البيانات (مش النسخة اللي على الشاشة)،
+  // عشان لو ولد اشترى هدية في نفس اللحظة اللي الأدمن بيعدّل فيها، طلبه مايضيعش.
+  const updateShop = async (updater: (current: ShopData) => ShopData) => {
     try {
-      await setDoc(SHOP_DOC, next);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(SHOP_DOC);
+        const raw = snap.exists() ? (snap.data() as ShopData) : DEFAULT_SHOP;
+        const current: ShopData = {
+          products: Array.isArray(raw.products) ? raw.products : [],
+          orders: Array.isArray(raw.orders) ? raw.orders : [],
+        };
+        const next = updater(current);
+        if (new Blob([JSON.stringify(next)]).size > 950000) {
+          throw new Error('بيانات المتجر كبرت جدًا ومش هتتحفظ. افتح الهدايا القديمة ودوس "حفظ" عشان صورها تتنقل للمكان الجديد.');
+        }
+        tx.set(SHOP_DOC, next);
+      });
+      return true;
     } catch (err: any) {
-      setShop(prev); // رجّع الحالة القديمة عشان الشاشة متوريش حاجة مش محفوظة فعليًا
-      alert('فشل الحفظ في قاعدة البيانات: ' + (err?.message || 'خطأ غير معروف') + '\n\nتأكد من قواعد الأمان (Firestore Rules) وحاول تاني.');
+      alert('فشل الحفظ: ' + (err?.message || 'خطأ غير معروف'));
+      return false;
+    }
+  };
+
+  // إلغاء طلب: الكمية ترجع للمخزن والنقط ترجع للولد، وبيتسجل في سجل نقطه
+  const cancelOrder = async (orderId: string) => {
+    if (!window.confirm('متأكد إنك عايز تلغي الطلب ده؟ النقط هترجع للولد والهدية هترجع للمخزن.')) return;
+    try {
+      await runTransaction(db, async (tx) => {
+        const shopSnap = await tx.get(SHOP_DOC);
+        const studentsSnap = await tx.get(STUDENTS_DOC);
+        const shopNow = shopSnap.exists() ? (shopSnap.data() as ShopData) : DEFAULT_SHOP;
+        const order = (shopNow.orders || []).find(o => o.id === orderId);
+        if (!order || order.status !== 'reserved') throw new Error('الطلب ده اتسلّم أو اتلغى قبل كده');
+
+        const products = (shopNow.products || []).map(p => p.id !== order.productId ? p : {
+          ...p, sizes: p.sizes.map(sz => sz.label === order.size ? { ...sz, qty: sz.qty + 1 } : sz),
+        });
+        const orders = shopNow.orders.map(o => o.id === orderId ? { ...o, status: 'cancelled' as const } : o);
+
+        const studentsData = studentsSnap.exists() ? (studentsSnap.data() as any) : { items: [] };
+        const items = Array.isArray(studentsData.items) ? [...studentsData.items] : [];
+        const idx = items.findIndex((st: any) =>
+          (order.studentId && st.id === order.studentId) ||
+          (!order.studentId && normalizePhone(st.phone) && normalizePhone(st.phone) === normalizePhone(order.studentPhone)));
+        if (idx === -1) throw new Error('مش لاقي الولد صاحب الطلب عشان أرجّعله النقط');
+
+        const st = items[idx];
+        // لو الطلب قديم ومفيهوش تفاصيل الخصم، النقط ترجع كلها لنقط السنة الحالية
+        const backCurrent = order.deductedCurrent ?? order.points;
+        const backPrev = order.deductedPrev ?? 0;
+        const cairoDateKey = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+        items[idx] = {
+          ...st,
+          points: (Number(st.points) || 0) + backCurrent,
+          previousYearsPoints: (Number(st.previousYearsPoints) || 0) + backPrev,
+          attendanceHistory: [{
+            id: genId(), date: cairoDateKey, points: order.points,
+            type: 'giftRefund', typeName: 'استرجاع نقاط (إلغاء طلب هدية)',
+            description: `${order.productName}${order.size && order.size !== 'عادي' ? ` (${order.size})` : ''}`,
+            recordedBy: 'متجر الهدايا', recordedAt: new Date().toISOString(),
+          }, ...(st.attendanceHistory || [])],
+        };
+
+        tx.set(STUDENTS_DOC, { ...studentsData, items }, { merge: true });
+        tx.set(SHOP_DOC, { products, orders });
+      });
+      alert('تم إلغاء الطلب ورجوع النقط للولد.');
+    } catch (err: any) {
+      alert(err?.message || 'حصل خطأ، حاول تاني');
     }
   };
 
@@ -356,23 +416,15 @@ const GiftsShopWidget: React.FC = () => {
                     {order.status === 'reserved' && (
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button
-                          onClick={() => {
-                            const next = { ...shop, orders: shop.orders.map(o => o.id === order.id ? { ...o, status: 'delivered' as const } : o) };
-                            saveShop(next);
-                          }}
+                          onClick={() => updateShop(cur => ({
+                            ...cur,
+                            orders: cur.orders.map(o => (o.id === order.id && o.status === 'reserved') ? { ...o, status: 'delivered' as const } : o),
+                          }))}
                           style={{ flex: 1, padding: '8px', borderRadius: '8px', border: 'none', background: '#059669', color: 'white', fontWeight: 700, fontSize: '13px' }}>
-                          ✓ تم التسليم (اخصم النقط يدويًا الآن)
+                          ✓ تم التسليم (النقط اتخصمت أوتوماتيك)
                         </button>
                         <button
-                          onClick={() => {
-                            // رجّع الكمية للمنتج وألغي الطلب
-                            const products = shop.products.map(p => {
-                              if (p.id !== order.productId) return p;
-                              return { ...p, sizes: p.sizes.map(s => s.label === order.size ? { ...s, qty: s.qty + 1 } : s) };
-                            });
-                            const orders = shop.orders.map(o => o.id === order.id ? { ...o, status: 'cancelled' as const } : o);
-                            saveShop({ products, orders });
-                          }}
+                          onClick={() => cancelOrder(order.id)}
                           style={{ padding: '8px 12px', borderRadius: '8px', border: 'none', background: '#dc2626', color: 'white', fontWeight: 700, fontSize: '13px' }}>
                           إلغاء
                         </button>
@@ -396,16 +448,22 @@ const GiftsShopWidget: React.FC = () => {
         <ProductEditor
           product={editingProduct}
           onClose={() => setEditingProduct(null)}
-          onSave={(p) => {
-            const exists = shop.products.some(x => x.id === p.id);
-            const products = exists ? shop.products.map(x => x.id === p.id ? p : x) : [...shop.products, p];
-            saveShop({ ...shop, products });
-            setEditingProduct(null);
+          onSave={async (p) => {
+            const ok = await updateShop(cur => {
+              const exists = cur.products.some(x => x.id === p.id);
+              return { ...cur, products: exists ? cur.products.map(x => x.id === p.id ? p : x) : [...cur.products, p] };
+            });
+            if (ok) setEditingProduct(null);
+            return ok;
           }}
-          onDelete={() => {
-            deleteImageDocs(editingProduct.images || []);
-            saveShop({ ...shop, products: shop.products.filter(x => x.id !== editingProduct.id) });
-            setEditingProduct(null);
+          onDelete={async () => {
+            if (!window.confirm(`متأكد إنك عايز تمسح "${editingProduct.name}"؟`)) return;
+            const target = editingProduct;
+            const ok = await updateShop(cur => ({ ...cur, products: cur.products.filter(x => x.id !== target.id) }));
+            if (ok) {
+              deleteImageDocs(target.images || []);
+              setEditingProduct(null);
+            }
           }}
         />
       )}
@@ -471,6 +529,7 @@ const GiftsShopWidget: React.FC = () => {
                   id: genId(), productId: product.id, productName: product.name,
                   size, studentName: liveStudent.name, studentPhone: liveStudent.phone,
                   points: orderingProduct.points, status: 'reserved', createdAt: new Date().toISOString(),
+                  studentId: liveStudent.id, deductedCurrent: fromCurrent, deductedPrev: remaining,
                 };
 
                 tx.set(STUDENTS_DOC, { ...studentsData, items: newItems }, { merge: true });
@@ -522,7 +581,7 @@ const compressImage = (file: File): Promise<string> => new Promise((resolve, rej
   reader.readAsDataURL(file);
 });
 
-const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (p: Product) => void; onDelete: () => void }> = ({ product, onClose, onSave, onDelete }) => {
+const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (p: Product) => Promise<boolean>; onDelete: () => void }> = ({ product, onClose, onSave, onDelete }) => {
   const [p, setP] = useState<Product>({ ...product, images: product.images || [] });
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -541,8 +600,8 @@ const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (
       // أي صورة قديمة متخزنة جوه بيانات المتجر نفسها بتتنقل للمكان الجديد
       const images = await Promise.all(p.images.map(img => (img && img.startsWith('data:')) ? storeImageDoc(img, p.id) : img));
       const removed = (product.images || []).filter(img => !images.includes(img));
-      deleteImageDocs(removed);
-      onSave({ ...p, images });
+      const ok = await onSave({ ...p, images });
+      if (ok) deleteImageDocs(removed); // الصور اللي اتشالت تتمسح بس بعد ما الحفظ ينجح
     } catch (e) {
       alert('حصل خطأ في حفظ الصور، اتأكد من النت وجرّب تاني');
     } finally {
@@ -643,6 +702,7 @@ const OrderForm: React.FC<{ product: Product; students: any[]; onClose: () => vo
   const [phone, setPhone] = useState('');
   const [step, setStep] = useState<'phone' | 'code'>('phone');
   const [code, setCode] = useState('');
+  const [pickedStudentId, setPickedStudentId] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const confirmationRef = useRef<ConfirmationResult | null>(null);
@@ -651,7 +711,9 @@ const OrderForm: React.FC<{ product: Product; students: any[]; onClose: () => vo
   const inputStyle: React.CSSProperties = { width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #4338ca', background: '#0f0a2e', color: 'white', marginBottom: '10px', fontSize: '14px' };
 
   const normalized = normalizePhone(phone);
-  const matchedStudent = normalized.length >= 7 ? students.find(s => normalizePhone(s.phone) === normalized) : null;
+  // لو أكتر من ولد متسجلين بنفس رقم الموبايل (إخوات مثلًا)، لازم يختار اسمه بنفسه عشان النقط ماتتخصمش من حد تاني
+  const phoneMatches = normalized.length >= 7 ? students.filter(s => normalizePhone(s.phone) === normalized) : [];
+  const matchedStudent = phoneMatches.length === 1 ? phoneMatches[0] : (phoneMatches.find(s => s.id === pickedStudentId) || null);
   const totalPoints = matchedStudent ? getTotalPoints(matchedStudent) : 0;
   const enough = matchedStudent ? totalPoints >= product.points : false;
 
@@ -711,7 +773,20 @@ const OrderForm: React.FC<{ product: Product; students: any[]; onClose: () => vo
           <label style={{ color: '#c7d2fe', fontSize: '12px' }}>رقم موبايلك (المسجل في الحضور)</label>
           <input style={inputStyle} value={phone} onChange={e => setPhone(e.target.value)} placeholder="01xxxxxxxxx" inputMode="tel" />
 
-          {normalized.length >= 7 && !matchedStudent && (
+          {phoneMatches.length > 1 && (
+            <div style={{ marginBottom: '10px' }}>
+              <p style={{ color: '#fbbf24', fontSize: '13px', margin: '-4px 0 6px' }}>الرقم ده متسجل لأكتر من حد، اختار اسمك:</p>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {phoneMatches.map(s => (
+                  <button key={s.id} type="button" onClick={() => setPickedStudentId(s.id)}
+                    style={{ padding: '6px 10px', borderRadius: '8px', border: pickedStudentId === s.id ? '2px solid #fbbf24' : '1px solid #4338ca', background: pickedStudentId === s.id ? '#312e81' : 'transparent', color: 'white', fontSize: '13px', fontWeight: 700 }}>
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {normalized.length >= 7 && phoneMatches.length === 0 && (
             <p style={{ color: '#f87171', fontSize: '13px', margin: '-4px 0 10px' }}>مش لاقي رقم الموبايل ده في قائمة الطلاب</p>
           )}
           {matchedStudent && (
