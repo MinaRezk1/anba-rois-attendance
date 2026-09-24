@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { db } from './firebase';
-import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, runTransaction, getDoc, deleteDoc } from 'firebase/firestore';
 import { getApp } from 'firebase/app';
 import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
 
@@ -53,6 +53,54 @@ type ShopData = { products: Product[]; orders: Order[] };
 
 const DEFAULT_SHOP: ShopData = { products: [], orders: [] };
 const genId = () => `_${Math.random().toString(36).substring(2, 11)}`;
+
+// ============================================================
+// تخزين الصور: كل صورة في مستند لوحدها (مجموعة shopImages) بدل ما تتحشر كلها جوه بيانات المتجر.
+// كده مفيش حد أقصى لعدد صور الهدايا كلها مع بعض، وبيانات المتجر نفسها بتفضل صغيرة وسريعة.
+// ============================================================
+const IMG_PREFIX = 'fsimg:';
+const imageCache = new Map<string, Promise<string>>();
+
+const resolveImageSrc = (src?: string): Promise<string> => {
+  if (!src) return Promise.resolve('');
+  if (!src.startsWith(IMG_PREFIX)) return Promise.resolve(src);
+  const id = src.slice(IMG_PREFIX.length);
+  if (!imageCache.has(id)) {
+    imageCache.set(id, getDoc(doc(db, 'shopImages', id))
+      .then(snap => (snap.exists() ? ((snap.data() as any)?.data || '') : ''))
+      .catch(() => { imageCache.delete(id); return ''; }));
+  }
+  return imageCache.get(id)!;
+};
+
+const useResolvedImage = (src?: string) => {
+  const [resolved, setResolved] = useState<string>(() => (src && !src.startsWith(IMG_PREFIX) ? src : ''));
+  useEffect(() => {
+    let alive = true;
+    resolveImageSrc(src).then(v => { if (alive) setResolved(v); });
+    return () => { alive = false; };
+  }, [src]);
+  return resolved;
+};
+
+const ShopImg: React.FC<{ src?: string; alt?: string; style?: React.CSSProperties; onClick?: () => void }> = ({ src, alt, style, onClick }) => {
+  const resolved = useResolvedImage(src);
+  if (!resolved) return <div style={{ ...(style || {}), background: '#312e81' }} onClick={onClick} />;
+  return <img src={resolved} alt={alt || ''} style={style} onClick={onClick} />;
+};
+
+const storeImageDoc = async (dataUrl: string, productId: string) => {
+  const id = `img${Date.now().toString(36)}${Math.random().toString(36).substring(2, 8)}`;
+  await setDoc(doc(db, 'shopImages', id), { data: dataUrl, productId, createdAt: new Date().toISOString() });
+  imageCache.set(id, Promise.resolve(dataUrl));
+  return IMG_PREFIX + id;
+};
+
+const deleteImageDocs = async (srcs: string[]) => {
+  await Promise.all((srcs || [])
+    .filter(src => typeof src === 'string' && src.startsWith(IMG_PREFIX))
+    .map(src => deleteDoc(doc(db, 'shopImages', src.slice(IMG_PREFIX.length))).catch(() => {})));
+};
 
 // ============================================================
 // المكوّن الرئيسي
@@ -125,6 +173,11 @@ const GiftsShopWidget: React.FC = () => {
 
   const saveShop = async (next: ShopData) => {
     const prev = shop;
+    const approxBytes = new Blob([JSON.stringify(next)]).size;
+    if (approxBytes > 950000) {
+      alert('بيانات المتجر كبرت جدًا ومش هتتحفظ. غالبًا فيه هدايا قديمة بصور متخزنة بالطريقة القديمة: افتح الهدايا دي ودوس "حفظ" تاني عشان صورها تتنقل للمكان الجديد.');
+      return;
+    }
     setShop(next); // تحديث فوري للشكل، بس هنرجعه لو الحفظ الحقيقي فشل
     try {
       await setDoc(SHOP_DOC, next);
@@ -237,7 +290,7 @@ const GiftsShopWidget: React.FC = () => {
                       }}>
                         <div style={{ width: '100%', aspectRatio: '1', background: '#312e81', position: 'relative' }}>
                           {product.images?.[0] ? (
-                            <img src={product.images[0]} alt={product.name} onClick={() => setGalleryProduct(product)}
+                            <ShopImg src={product.images[0]} alt={product.name} onClick={() => setGalleryProduct(product)}
                               style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }} />
                           ) : (
                             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '40px' }}>🎁</div>
@@ -350,6 +403,7 @@ const GiftsShopWidget: React.FC = () => {
             setEditingProduct(null);
           }}
           onDelete={() => {
+            deleteImageDocs(editingProduct.images || []);
             saveShop({ ...shop, products: shop.products.filter(x => x.id !== editingProduct.id) });
             setEditingProduct(null);
           }}
@@ -471,7 +525,30 @@ const compressImage = (file: File): Promise<string> => new Promise((resolve, rej
 const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (p: Product) => void; onDelete: () => void }> = ({ product, onClose, onSave, onDelete }) => {
   const [p, setP] = useState<Product>({ ...product, images: product.images || [] });
   const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const addedThisSession = useRef<string[]>([]);
   const inputStyle: React.CSSProperties = { width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #4338ca', background: '#0f0a2e', color: 'white', marginBottom: '10px', fontSize: '14px' };
+
+  // لو قفلت من غير حفظ، امسح الصور اللي اترفعت في الجلسة دي بس
+  const handleClose = () => {
+    deleteImageDocs(addedThisSession.current);
+    onClose();
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      // أي صورة قديمة متخزنة جوه بيانات المتجر نفسها بتتنقل للمكان الجديد
+      const images = await Promise.all(p.images.map(img => (img && img.startsWith('data:')) ? storeImageDoc(img, p.id) : img));
+      const removed = (product.images || []).filter(img => !images.includes(img));
+      deleteImageDocs(removed);
+      onSave({ ...p, images });
+    } catch (e) {
+      alert('حصل خطأ في حفظ الصور، اتأكد من النت وجرّب تاني');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -480,7 +557,9 @@ const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (
       const urls: string[] = [];
       for (const file of Array.from(files)) {
         const dataUrl = await compressImage(file);
-        urls.push(dataUrl);
+        const ref = await storeImageDoc(dataUrl, p.id);
+        addedThisSession.current.push(ref);
+        urls.push(ref);
       }
       setP(prev => ({ ...prev, images: [...prev.images, ...urls] }));
     } catch (e) {
@@ -491,7 +570,7 @@ const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (
   };
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={handleClose}>
       <h2 style={{ color: '#fbbf24', fontWeight: 800, marginBottom: '12px' }}>{product.name ? 'تعديل هدية' : 'هدية جديدة'}</h2>
       <label style={{ color: '#c7d2fe', fontSize: '12px' }}>اسم الهدية</label>
       <input style={inputStyle} value={p.name} onChange={e => setP({ ...p, name: e.target.value })} placeholder="تيشيرت الخدمة" />
@@ -501,7 +580,7 @@ const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
           {p.images.map((img, i) => (
             <div key={i} style={{ position: 'relative', width: '60px', height: '60px' }}>
-              <img src={img} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }} />
+              <ShopImg src={img} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }} />
               <button onClick={() => setP(prev => ({ ...prev, images: prev.images.filter((_, idx) => idx !== i) }))}
                 style={{ position: 'absolute', top: '-6px', right: '-6px', background: '#dc2626', border: 'none', borderRadius: '50%', width: '20px', height: '20px', color: 'white', fontSize: '11px', lineHeight: 1 }}>✕</button>
             </div>
@@ -550,9 +629,9 @@ const ProductEditor: React.FC<{ product: Product; onClose: () => void; onSave: (
         placeholder="S:3, M:5, L:2"
       />
       <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-        <button onClick={() => onSave(p)} disabled={!p.name || uploading} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: '#f59e0b', color: '#1e1b4b', fontWeight: 800 }}>حفظ</button>
+        <button onClick={handleSave} disabled={!p.name || uploading || saving} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: 'none', background: '#f59e0b', color: '#1e1b4b', fontWeight: 800 }}>{saving ? 'جاري الحفظ...' : 'حفظ'}</button>
         {product.name && <button onClick={onDelete} style={{ padding: '12px 16px', borderRadius: '10px', border: 'none', background: '#dc2626', color: 'white', fontWeight: 700 }}>حذف</button>}
-        <button onClick={onClose} style={{ padding: '12px 16px', borderRadius: '10px', border: '1px solid #4338ca', background: 'transparent', color: '#c7d2fe' }}>إلغاء</button>
+        <button onClick={handleClose} style={{ padding: '12px 16px', borderRadius: '10px', border: '1px solid #4338ca', background: 'transparent', color: '#c7d2fe' }}>إلغاء</button>
       </div>
     </Overlay>
   );
@@ -674,7 +753,7 @@ const OrderForm: React.FC<{ product: Product; students: any[]; onClose: () => vo
 const ImageGallery: React.FC<{ product: Product; onClose: () => void }> = ({ product, onClose }) => {
   const [index, setIndex] = useState(0);
   const images = product.images || [];
-  const current = images[index];
+  const current = useResolvedImage(images[index]);
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 10001, background: 'rgba(0,0,0,0.92)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '16px', direction: 'rtl' }}>
       <button onClick={onClose} style={{ position: 'absolute', top: '16px', left: '16px', background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '8px', color: 'white', width: '36px', height: '36px', fontSize: '18px' }}>✕</button>
