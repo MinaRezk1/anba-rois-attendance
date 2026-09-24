@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.19.9';
+const APP_VERSION = '2026.09.23.v9';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -4759,6 +4759,7 @@ const App = () => {
                 )}
             </Modal>
 
+            <div style={{ position: 'fixed', bottom: 4, right: 8, fontSize: 10, opacity: 0.45, color: '#c7d2fe', zIndex: 1, pointerEvents: 'none', direction: 'ltr' }}>v{APP_VERSION}</div>
         </div>
     );
 };
