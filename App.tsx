@@ -3,14 +3,14 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './index.css';
 import { db } from './firebase';
 import './GiftsShop';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 
 
 
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.23.v10';
+const APP_VERSION = '2026.09.23.v11';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -1344,6 +1344,101 @@ const mergeAdminsData = (local, dbItems) => {
     return Array.from(adminMap.values());
 };
 
+// ============================================================
+// حفظ آمن لما أكتر من خادم يسجّل في نفس الوقت
+// بدل ما كل جهاز يكتب قايمة الطلاب كلها فوق بعض (فيضيع شغل جهاز تاني)،
+// كل جهاز بيبعت "اللي هو غيّره بس" ويدمجه على آخر نسخة موجودة فعلًا في قاعدة البيانات.
+// ============================================================
+const sameJSON = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const mergeHistoryLists = (baseList, localList, remoteList) => {
+    const base = Array.isArray(baseList) ? baseList : [];
+    const local = Array.isArray(localList) ? localList : [];
+    const remote = Array.isArray(remoteList) ? remoteList : [];
+    const baseById = new Map(base.filter(r => r && r.id).map(r => [r.id, r]));
+    const localById = new Map(local.filter(r => r && r.id).map(r => [r.id, r]));
+    const deletedLocally = new Set([...baseById.keys()].filter(id => !localById.has(id)));
+    const remoteIds = new Set(remote.filter(r => r && r.id).map(r => r.id));
+    // سجلات جديدة اتضافت من الجهاز ده ولسه مش موجودة في القاعدة
+    const addedLocally = local.filter(r => r && r.id && !baseById.has(r.id) && !remoteIds.has(r.id));
+    const kept = remote
+        .filter(r => !(r && r.id && deletedLocally.has(r.id)))
+        .map(r => {
+            if (!r || !r.id) return r;
+            const b = baseById.get(r.id);
+            const l = localById.get(r.id);
+            // لو الجهاز ده عدّل السجل نفسه، خد تعديله
+            return (b && l && !sameJSON(b, l)) ? l : r;
+        });
+    return [...addedLocally, ...kept];
+};
+
+const mergeStudentRecord = (base, local, remote) => {
+    const result = { ...remote };
+    const keys = new Set([...Object.keys(base || {}), ...Object.keys(local || {})]);
+    keys.forEach(key => {
+        if (key === 'id') return;
+        const inLocal = local && Object.prototype.hasOwnProperty.call(local, key);
+        if (key === 'points' || key === 'previousYearsPoints') {
+            // النقط بتتدمج كـ"فرق": اللي الجهاز ده زوّده أو نقّصه بيتضاف على الرقم الحالي في القاعدة
+            const delta = Number(local?.[key] || 0) - Number(base?.[key] || 0);
+            if (delta !== 0) result[key] = Number(remote?.[key] || 0) + delta;
+            return;
+        }
+        if (key === 'attendanceHistory') {
+            if (!sameJSON(base?.attendanceHistory, local?.attendanceHistory)) {
+                result.attendanceHistory = mergeHistoryLists(base?.attendanceHistory, local?.attendanceHistory, remote?.attendanceHistory);
+            }
+            return;
+        }
+        if (!inLocal) {
+            if (base && Object.prototype.hasOwnProperty.call(base, key)) delete result[key];
+            return;
+        }
+        if (!sameJSON(local[key], base?.[key])) result[key] = local[key];
+    });
+    return result;
+};
+
+const mergeStudentLists = (baseList, localList, remoteList) => {
+    const base = Array.isArray(baseList) ? baseList : [];
+    const local = Array.isArray(localList) ? localList : [];
+    const remote = Array.isArray(remoteList) ? remoteList : [];
+    const baseById = new Map(base.filter(s => s && s.id).map(s => [s.id, s]));
+    const localById = new Map(local.filter(s => s && s.id).map(s => [s.id, s]));
+    const remoteIds = new Set(remote.filter(s => s && s.id).map(s => s.id));
+
+    const merged = [];
+    remote.forEach(r => {
+        if (!r || !r.id) { merged.push(r); return; }
+        const b = baseById.get(r.id);
+        const l = localById.get(r.id);
+        if (b && !l) return;                 // اتمسح من الجهاز ده
+        if (!b || !l || sameJSON(b, l)) { merged.push(r); return; } // الجهاز ده ماغيّرش فيه حاجة
+        merged.push(mergeStudentRecord(b, l, r));
+    });
+    // طلاب جداد اتضافوا من الجهاز ده
+    local.forEach(l => {
+        if (l && l.id && !baseById.has(l.id) && !remoteIds.has(l.id)) merged.push(l);
+    });
+    return merged;
+};
+
+const STUDENTS_DOC_REF = () => doc(db, 'appData', 'students_v9');
+
+const commitStudentsMerge = (baseList, localList) => runTransaction(db, async (tx) => {
+    const snap = await tx.get(STUDENTS_DOC_REF());
+    const remoteItems = snap.exists() && Array.isArray(snap.data()?.items) ? snap.data().items : null;
+    // لو القاعدة فاضية (أول مرة / بعد نقل)، اكتب النسخة المحلية زي ما هي
+    const finalItems = remoteItems ? mergeStudentLists(baseList, localList, remoteItems) : localList;
+    tx.set(STUDENTS_DOC_REF(), { items: finalItems }, { merge: true });
+    return finalItems;
+});
+
+const safeParseList = (str) => {
+    try { const v = JSON.parse(str || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+};
+
 // --- App Component ---
 const App = () => {
     const [students, setStudents] = useState(() => {
@@ -1596,7 +1691,7 @@ const App = () => {
                     localStorage.setItem('church_attendance_students_v9', str);
                     setStudents(approvedItems);
                     if (JSON.stringify(approvedItems) !== JSON.stringify(dbItems)) {
-                        setDoc(doc(db, 'appData', 'students_v9'), { items: approvedItems }, { merge: true })
+                        commitStudentsMerge(dbItems, approvedItems)
                             .catch(err => console.error("Error syncing roster corrections:", err));
                     }
                 } else {
@@ -1662,10 +1757,14 @@ const App = () => {
 
         const currentStr = JSON.stringify(students);
         if (currentStr !== lastStudentsDB.current) {
+            const baseList = safeParseList(lastStudentsDB.current);
             localStorage.setItem('church_attendance_students_v9', currentStr);
-            setDoc(doc(db, 'appData', 'students_v9'), { items: students }, { merge: true })
-                .catch(err => console.error("Error saving students to Firestore:", err));
             lastStudentsDB.current = currentStr;
+            commitStudentsMerge(baseList, students)
+                .catch(err => {
+                    console.error("Error saving students to Firestore:", err);
+                    showToast('⚠️ فشل حفظ آخر تعديل، اتأكد من النت وجرّب تاني.');
+                });
         }
 
         const currentAdminsStr = JSON.stringify(admins);
@@ -1679,10 +1778,11 @@ const App = () => {
 
         const saveStudentsData = useCallback((newStudents) => {
         const str = JSON.stringify(newStudents);
+        const baseList = safeParseList(lastStudentsDB.current);
         lastStudentsDB.current = str;
         localStorage.setItem('church_attendance_students_v9', str);
         setStudents(newStudents);
-        setDoc(doc(db, 'appData', 'students_v9'), { items: newStudents }, { merge: true })
+        commitStudentsMerge(baseList, newStudents)
             .catch(err => console.error("Error saving students to Firestore:", err));
     }, []);
 
@@ -1747,11 +1847,12 @@ const App = () => {
         });
 
         if (migratedStudents) {
+            const migBase = safeParseList(lastStudentsDB.current);
             setStudents(currentStudents);
             const mergedStr = JSON.stringify(currentStudents);
             lastStudentsDB.current = mergedStr;
             localStorage.setItem('church_attendance_students_v9', mergedStr);
-            setDoc(doc(db, 'appData', 'students_v9'), { items: currentStudents }, { merge: true })
+            commitStudentsMerge(migBase, currentStudents)
                 .then(() => {
                     showToast("🎉 تم استيراد ودمج سجلات الطلاب القديمة من جهازك بنجاح!");
                 })
@@ -2219,8 +2320,16 @@ const App = () => {
     };
 
     const handleImportData = (e) => {
+        const input = e.currentTarget || e.target;
         const file = e.target.files[0];
         if (!file) return;
+        const confirmed = window.confirm(
+            `⚠️ تحذير مهم\n\nهتستبدل كل بيانات الطلاب والنقط الحالية بمحتوى الملف:\n"${file.name}"\n\nأي نقط أو حضور اتسجل بعد تاريخ الملف ده هيضيع.\n\nمتأكد إنك عايز تكمل؟`
+        );
+        if (!confirmed) {
+            if (input) input.value = '';
+            return;
+        }
 
         const reader = new FileReader();
         reader.onload = (event) => {
