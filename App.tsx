@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.23.v9';
+const APP_VERSION = '2026.09.23.v10';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -1474,6 +1474,57 @@ const App = () => {
         };
 
         refreshClientForNewVersion();
+    }, []);
+
+    // تحديث تلقائي: الموقع بيتأكد بنفسه لو فيه نسخة أحدث اترفعت، ولو لقى، بيمسح الكاش ويعمل ريفريش لوحده.
+    // بيشتغل أول ما الموقع يفتح، وكل ما الموبايل يرجع للتطبيق، وكل 5 دقايق وهو مفتوح.
+    useEffect(() => {
+        const currentScript = document.querySelector('script[type="module"][src]') as HTMLScriptElement | null;
+        const currentSrc = currentScript ? new URL(currentScript.src, window.location.href).pathname : '';
+        if (!currentSrc.includes('/assets/')) return; // وضع التطوير المحلي - مفيش داعي للفحص
+        const basePath = currentSrc.split('/assets/')[0] + '/';
+        let stopped = false;
+
+        const checkForNewDeploy = async () => {
+            if (stopped || document.visibilityState === 'hidden') return;
+            try {
+                const res = await fetch(`${basePath}index.html?check=${Date.now()}`, { cache: 'no-store' });
+                if (!res.ok) return;
+                const html = await res.text();
+                const match = html.match(/<script[^>]*type="module"[^>]*src="([^"]+)"/);
+                if (!match) return;
+                const latestSrc = new URL(match[1], window.location.href).pathname;
+                if (!latestSrc || latestSrc === currentSrc) return;
+                // حماية من الريفريش المتكرر: مرة واحدة بس لكل نسخة جديدة
+                if (sessionStorage.getItem('church_attendance_reloaded_for') === latestSrc) return;
+                sessionStorage.setItem('church_attendance_reloaded_for', latestSrc);
+                try {
+                    if ('caches' in window) {
+                        const names = await caches.keys();
+                        await Promise.all(names.map(name => caches.delete(name)));
+                    }
+                    if ('serviceWorker' in navigator) {
+                        const regs = await navigator.serviceWorker.getRegistrations();
+                        await Promise.all(regs.map(reg => reg.unregister()));
+                    }
+                } catch (e) {
+                    console.warn('Cache cleanup before update failed:', e);
+                }
+                window.location.reload();
+            } catch (e) {
+                // مفيش نت أو مشكلة مؤقتة - هيحاول تاني بعدين
+            }
+        };
+
+        checkForNewDeploy();
+        const interval = setInterval(checkForNewDeploy, 5 * 60 * 1000);
+        const onVisible = () => { if (document.visibilityState === 'visible') checkForNewDeploy(); };
+        document.addEventListener('visibilitychange', onVisible);
+        return () => {
+            stopped = true;
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', onVisible);
+        };
     }, []);
 
     useEffect(() => {
