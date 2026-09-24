@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.24.v15';
+const APP_VERSION = '2026.09.24.v16';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -2870,11 +2870,9 @@ const App = () => {
 
     const isAuthenticated = !!loggedInAdmin;
     const isSuperAdmin = loggedInAdmin?.isSuperAdmin;
-    const isMinaAdmin = useMemo(() => {
-        if (!loggedInAdmin || !loggedInAdmin.name) return false;
-        const name = loggedInAdmin.name.trim();
-        return name.includes('مينا') || name.toLowerCase().includes('mina');
-    }, [loggedInAdmin]);
+    // صلاحيات "مينا" (المتجر، تعديل نقط السنين اللي فاتت، تنبيهات الأوسمة) للسوبر أدمن بس.
+    // (قبل كده كانت بتتحدد من الاسم، فأي خادم اسمه فيه "مينا" زي "مينا معوض" كان بياخدها بالغلط.)
+    const isMinaAdmin = useMemo(() => Boolean(loggedInAdmin && loggedInAdmin.isSuperAdmin), [loggedInAdmin]);
 
     // بث حالة دخول مينا لملف الهدايا (GiftsShop.tsx) المستقل - إضافة فقط، مش بتغيّر أي منطق موجود
     useEffect(() => {
