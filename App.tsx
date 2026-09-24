@@ -1347,7 +1347,7 @@ const mergeAdminsData = (local, dbItems) => {
 // --- App Component ---
 const App = () => {
     const [students, setStudents] = useState(() => {
-        const local = localStorage.getItem('church_attendance_students_v8');
+        const local = localStorage.getItem('church_attendance_students_v9');
         if (local) {
             try {
                 const parsed = JSON.parse(local);
@@ -1526,68 +1526,33 @@ const App = () => {
 
     const isInitialMount = useRef(true);
 
-    const lastStudentsDB = useRef<string>(localStorage.getItem('church_attendance_students_v8') || '[]');
+    const lastStudentsDB = useRef<string>(localStorage.getItem('church_attendance_students_v9') || '[]');
     const lastAdminsDB = useRef<string>(localStorage.getItem('church_attendance_admins_v8') || '[]');
     const isRosterMigrationInProgress = useRef(false);
 
     // Initialize Data from Firebase with Offline-Resilient Merging
     useEffect(() => {
-        const unsubStudents = onSnapshot(doc(db, 'appData', 'students_v8'), (docSnap) => {
+        const unsubStudents = onSnapshot(doc(db, 'appData', 'students_v9'), (docSnap) => {
             if (docSnap.exists()) {
                 const dbItems = docSnap.data()?.items;
                 if (Array.isArray(dbItems)) {
                     const approvedItems = filterToApprovedRoster(dbItems);
-                    const storedMigrationVersion = docSnap.data()?.rosterMigrationVersion || '';
-                    const needsSeasonReset = storedMigrationVersion !== CURRENT_ROSTER_MIGRATION_VERSION;
-
                     if (isRosterMigrationInProgress.current) return;
-
-                    // ملحوظة مهمة: الشرط ده بيتحدد بس من قيمة محفوظة في قاعدة البيانات نفسها (rosterMigrationVersion)
-                    // مش من أي حاجة متخزنة في المتصفح (localStorage) - عشان مسح بيانات الموقع أو تغيير الجهاز
-                    // ميعملش "ريسيت" تاني لنقط الطلاب بالغلط.
-                    if (needsSeasonReset) {
-                        isRosterMigrationInProgress.current = true;
-                        const exactRoster = buildExactCurrentRoster(dbItems);
-                        setDoc(doc(db, 'appData', 'students_pre_roster_2026_backup'), {
-                            items: dbItems,
-                            createdAt: new Date().toISOString(),
-                            migrationVersion: CURRENT_ROSTER_MIGRATION_VERSION,
-                        }, { merge: true })
-                            .then(() => setDoc(doc(db, 'appData', 'students_v8'), {
-                                items: exactRoster,
-                                rosterMigrationVersion: CURRENT_ROSTER_MIGRATION_VERSION,
-                                seasonReset: true,
-                            }, { merge: true }))
-                            .then(() => {
-                                const str = JSON.stringify(exactRoster);
-                                lastStudentsDB.current = str;
-                                localStorage.setItem('church_attendance_students_v8', str);
-                                setStudents(exactRoster);
-                                showToast('✅ تم تحديث كشف الـ84 طالب وتصفير النقاط الحالية وترحيل النقاط القديمة.');
-                            })
-                            .catch(err => {
-                                console.error("Error applying 84-student roster migration:", err);
-                                showToast('❌ حصل خطأ أثناء تحديث كشف الطلاب. البيانات القديمة محفوظة.');
-                            })
-                            .finally(() => {
-                                isRosterMigrationInProgress.current = false;
-                            });
-                        return;
-                    }
+                    // تم إلغاء "تصفير الموسم" التلقائي نهائيًا - اتعمل مرة واحدة خلاص، ومبقاش ينفع يتكرر لوحده تاني.
 
                     const str = JSON.stringify(approvedItems);
                     lastStudentsDB.current = str;
-                    localStorage.setItem('church_attendance_students_v8', str);
+                    localStorage.setItem('church_attendance_students_v9', str);
                     setStudents(approvedItems);
                     if (JSON.stringify(approvedItems) !== JSON.stringify(dbItems)) {
-                        setDoc(doc(db, 'appData', 'students_v8'), { items: approvedItems }, { merge: true })
+                        setDoc(doc(db, 'appData', 'students_v9'), { items: approvedItems }, { merge: true })
                             .catch(err => console.error("Error syncing roster corrections:", err));
                     }
                 } else {
                     setStudents([]);
                 }
             } else {
-                const local = localStorage.getItem('church_attendance_students_v8');
+                const local = localStorage.getItem('church_attendance_students_v9');
                 if (local) {
                     try {
                         const parsed = JSON.parse(local);
@@ -1646,8 +1611,8 @@ const App = () => {
 
         const currentStr = JSON.stringify(students);
         if (currentStr !== lastStudentsDB.current) {
-            localStorage.setItem('church_attendance_students_v8', currentStr);
-            setDoc(doc(db, 'appData', 'students_v8'), { items: students }, { merge: true })
+            localStorage.setItem('church_attendance_students_v9', currentStr);
+            setDoc(doc(db, 'appData', 'students_v9'), { items: students }, { merge: true })
                 .catch(err => console.error("Error saving students to Firestore:", err));
             lastStudentsDB.current = currentStr;
         }
@@ -1664,9 +1629,9 @@ const App = () => {
         const saveStudentsData = useCallback((newStudents) => {
         const str = JSON.stringify(newStudents);
         lastStudentsDB.current = str;
-        localStorage.setItem('church_attendance_students_v8', str);
+        localStorage.setItem('church_attendance_students_v9', str);
         setStudents(newStudents);
-        setDoc(doc(db, 'appData', 'students_v8'), { items: newStudents }, { merge: true })
+        setDoc(doc(db, 'appData', 'students_v9'), { items: newStudents }, { merge: true })
             .catch(err => console.error("Error saving students to Firestore:", err));
     }, []);
 
@@ -1734,8 +1699,8 @@ const App = () => {
             setStudents(currentStudents);
             const mergedStr = JSON.stringify(currentStudents);
             lastStudentsDB.current = mergedStr;
-            localStorage.setItem('church_attendance_students_v8', mergedStr);
-            setDoc(doc(db, 'appData', 'students_v8'), { items: currentStudents }, { merge: true })
+            localStorage.setItem('church_attendance_students_v9', mergedStr);
+            setDoc(doc(db, 'appData', 'students_v9'), { items: currentStudents }, { merge: true })
                 .then(() => {
                     showToast("🎉 تم استيراد ودمج سجلات الطلاب القديمة من جهازك بنجاح!");
                 })

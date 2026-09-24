@@ -11,7 +11,7 @@ const auth = getAuth(getApp()); // بيستخدم نفس مشروع Firebase ب�
 // إعدادات
 // ============================================================
 const SHOP_DOC = doc(db, 'shop', 'data'); // مستند مستقل تمامًا لبيانات المتجر
-const STUDENTS_DOC = doc(db, 'appData', 'students_v8'); // نفس مستند بيانات الطلاب والنقط الأساسي
+const STUDENTS_DOC = doc(db, 'appData', 'students_v9'); // نفس مستند بيانات الطلاب والنقط الأساسي
 
 // رقم الموبايل ممكن يتكتب بأشكال مختلفة (بمسافات، بصفر، بـ 20+ إلخ) - الدالة دي بتوحّدهم
 const normalizePhone = (value: string) => {
