@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.23.v14';
+const APP_VERSION = '2026.09.24.v15';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -1453,14 +1453,17 @@ const mergeStudentLists = (baseList, localList, remoteList) => {
 
 const STUDENTS_DOC_REF = () => doc(db, 'appData', 'students_v9');
 
-const commitStudentsMerge = (baseList, localList) => runTransaction(db, async (tx) => {
-    const snap = await tx.get(STUDENTS_DOC_REF());
+const commitListMerge = (docRef, baseList, localList) => runTransaction(db, async (tx) => {
+    const snap = await tx.get(docRef);
     const remoteItems = snap.exists() && Array.isArray(snap.data()?.items) ? snap.data().items : null;
     // لو القاعدة فاضية (أول مرة / بعد نقل)، اكتب النسخة المحلية زي ما هي
     const finalItems = remoteItems ? mergeStudentLists(baseList, localList, remoteItems) : localList;
-    tx.set(STUDENTS_DOC_REF(), { items: finalItems }, { merge: true });
+    tx.set(docRef, { items: finalItems }, { merge: true });
     return finalItems;
 });
+const commitStudentsMerge = (baseList, localList) => commitListMerge(STUDENTS_DOC_REF(), baseList, localList);
+const ADMINS_DOC_REF = () => doc(db, 'appData', 'admins_v8');
+const commitAdminsMerge = (baseList, localList) => commitListMerge(ADMINS_DOC_REF(), baseList, localList);
 
 const safeParseList = (str) => {
     try { const v = JSON.parse(str || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
@@ -1701,6 +1704,11 @@ const App = () => {
     };
 
     const isInitialMount = useRef(true);
+    // مفيش أي حفظ بيحصل غير بعد ما البيانات الحقيقية توصل من قاعدة البيانات الأول.
+    // (قبل كده: جهاز جديد أول مرة يفتح الموقع كان بيكتب قايمة الخدام الافتراضية القديمة فوق القايمة الحقيقية،
+    //  فأي رقم سري اتغيّر أو خادم اتضاف كان بيرجع للقديم.)
+    const studentsLoadedFromServer = useRef(false);
+    const adminsLoadedFromServer = useRef(false);
 
     const lastStudentsDB = useRef<string>(localStorage.getItem('church_attendance_students_v9') || '[]');
     // مراقبة حجم بيانات الطلاب (الحد الأقصى لـFirebase 1 ميجا للمستند الواحد)
@@ -1708,6 +1716,7 @@ const App = () => {
     const lastAdminsDB = useRef<string>(localStorage.getItem('church_attendance_admins_v8') || '[]');
     // تشفير تلقائي لأي رقم سري قديم لسه متخزن زي ما هو في قاعدة البيانات (بيحصل مرة واحدة)
     useEffect(() => {
+        if (!adminsLoadedFromServer.current) return;
         if (!Array.isArray(admins) || !admins.some(a => a && a.pin && !isHashedPin(a.pin))) return;
         let cancelled = false;
         (async () => {
@@ -1726,6 +1735,7 @@ const App = () => {
     // Initialize Data from Firebase with Offline-Resilient Merging
     useEffect(() => {
         const unsubStudents = onSnapshot(doc(db, 'appData', 'students_v9'), (docSnap) => {
+            studentsLoadedFromServer.current = true;
             if (docSnap.exists()) {
                 try { setStudentsDocBytes(new Blob([JSON.stringify(docSnap.data())]).size); } catch (e) {}
                 const dbItems = docSnap.data()?.items;
@@ -1765,6 +1775,7 @@ const App = () => {
             if (docSnap.exists()) {
                 const dbItems = docSnap.data()?.items;
                 if (Array.isArray(dbItems)) {
+                    adminsLoadedFromServer.current = true;
                     const str = JSON.stringify(dbItems);
                     lastAdminsDB.current = str;
                     localStorage.setItem('church_attendance_admins_v8', str);
@@ -1773,6 +1784,9 @@ const App = () => {
                     setAdmins(defaultAdminsData);
                 }
             } else {
+                // المستند مش موجود فعلًا في القاعدة (مشروع جديد): مسموح نكتب القايمة لأول مرة
+                adminsLoadedFromServer.current = true;
+                lastAdminsDB.current = '[]';
                 const local = localStorage.getItem('church_attendance_admins_v8');
                 if (local) {
                     try {
@@ -1804,7 +1818,7 @@ const App = () => {
         }
 
         const currentStr = JSON.stringify(students);
-        if (currentStr !== lastStudentsDB.current) {
+        if (studentsLoadedFromServer.current && currentStr !== lastStudentsDB.current) {
             const baseList = safeParseList(lastStudentsDB.current);
             localStorage.setItem('church_attendance_students_v9', currentStr);
             lastStudentsDB.current = currentStr;
@@ -1816,11 +1830,15 @@ const App = () => {
         }
 
         const currentAdminsStr = JSON.stringify(admins);
-        if (currentAdminsStr !== lastAdminsDB.current) {
+        if (adminsLoadedFromServer.current && currentAdminsStr !== lastAdminsDB.current) {
+            const adminsBase = safeParseList(lastAdminsDB.current);
             localStorage.setItem('church_attendance_admins_v8', currentAdminsStr);
-            setDoc(doc(db, 'appData', 'admins_v8'), { items: admins }, { merge: true })
-                .catch(err => console.error("Error saving admins to Firestore:", err));
             lastAdminsDB.current = currentAdminsStr;
+            commitAdminsMerge(adminsBase, admins)
+                .catch(err => {
+                    console.error("Error saving admins to Firestore:", err);
+                    showToast('⚠️ فشل حفظ تعديل الخدام، اتأكد من النت وجرّب تاني.');
+                });
         }
     }, [students, admins]);
 
@@ -1835,11 +1853,13 @@ const App = () => {
     }, []);
 
     const saveAdminsData = useCallback((newAdmins) => {
+        if (!adminsLoadedFromServer.current) return;
         const str = JSON.stringify(newAdmins);
+        const adminsBase = safeParseList(lastAdminsDB.current);
         lastAdminsDB.current = str;
         localStorage.setItem('church_attendance_admins_v8', str);
         setAdmins(newAdmins);
-        setDoc(doc(db, 'appData', 'admins_v8'), { items: newAdmins }, { merge: true })
+        commitAdminsMerge(adminsBase, newAdmins)
             .catch(err => console.error("Error saving admins to Firestore:", err));
     }, []);
 
@@ -1907,14 +1927,8 @@ const App = () => {
                 .catch(err => console.error("Error saving migrated students:", err));
         }
 
-        if (migratedAdmins) {
-            setAdmins(currentAdmins);
-            const mergedStr = JSON.stringify(currentAdmins);
-            lastAdminsDB.current = mergedStr;
-            localStorage.setItem('church_attendance_admins_v8', mergedStr);
-            setDoc(doc(db, 'appData', 'admins_v8'), { items: currentAdmins }, { merge: true })
-                .catch(err => console.error("Error saving migrated admins:", err));
-        }
+        // بيانات الخدام القديمة المتخزنة على الجهاز من إصدارات قديمة جدًا مابقتش بتتكتب في قاعدة البيانات
+        // (كانت ممكن ترجّع أرقام سرية قديمة). بتتمسح من الجهاز وبس.
     }, []);
 
     // Automatic monthly champion rewards removed in favor of manual servant control
