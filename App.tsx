@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.23.v12';
+const APP_VERSION = '2026.09.23.v13';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -1546,6 +1546,9 @@ const App = () => {
     const [newAdminPin, setNewAdminPin] = useState('');
     const [editingAdminId, setEditingAdminId] = useState(null);
     const [editingAdminPinValue, setEditingAdminPinValue] = useState('');
+    const [ownPinCurrent, setOwnPinCurrent] = useState('');
+    const [ownPinNew, setOwnPinNew] = useState('');
+    const [ownPinConfirm, setOwnPinConfirm] = useState('');
 
     const [selectedDate, setSelectedDate] = useState(() => getCairoDateKey());
     
@@ -2336,6 +2339,30 @@ const App = () => {
     const handleStartEditPin = (admin) => {
         setEditingAdminId(admin.id);
         setEditingAdminPinValue('');
+    };
+
+    // تغيير الرقم السري للسوبر أدمن نفسه (لازم يكتب رقمه الحالي الأول للتأكيد)
+    const handleChangeOwnPin = async () => {
+        if (!loggedInAdmin) return;
+        const me = admins.find(a => a.id === loggedInAdmin.id);
+        if (!me) return;
+        if (!(await verifyPin(ownPinCurrent, me.pin))) {
+            showToast('الرقم السري الحالي غلط.');
+            return;
+        }
+        if (!/^\d{6,}$/.test(ownPinNew)) {
+            showToast('الرقم السري الجديد يجب أن يتكون من 6 أرقام على الأقل.');
+            return;
+        }
+        if (ownPinNew !== ownPinConfirm) {
+            showToast('الرقمين الجداد مش متطابقين.');
+            return;
+        }
+        const hashed = await hashPin(ownPinNew);
+        setAdmins(prev => prev.map(a => a.id === me.id ? { ...a, pin: hashed, failedAttempts: 0 } : a));
+        setLoggedInAdmin(prev => prev ? { ...prev, pin: hashed } : prev);
+        setOwnPinCurrent(''); setOwnPinNew(''); setOwnPinConfirm('');
+        showToast('✅ تم تغيير رقمك السري بنجاح.');
     };
 
     const handleSaveAdminPin = async (adminId) => {
@@ -4542,6 +4569,20 @@ const App = () => {
                             <span>إضافة</span>
                         </button>
                     </div>
+                </div>
+
+                <div className="mt-6 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg space-y-2">
+                    <h3 className="text-base font-bold text-amber-400">🔑 تغيير رقمي السري</h3>
+                    <input type="password" inputMode="numeric" value={ownPinCurrent} onChange={e => setOwnPinCurrent(e.target.value)} placeholder="رقمك السري الحالي"
+                        className="w-full bg-indigo-700 text-white placeholder-indigo-300 border border-indigo-600 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-500" />
+                    <input type="password" inputMode="numeric" value={ownPinNew} onChange={e => setOwnPinNew(e.target.value)} placeholder="الرقم الجديد (6 أرقام على الأقل)"
+                        className="w-full bg-indigo-700 text-white placeholder-indigo-300 border border-indigo-600 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-500" />
+                    <input type="password" inputMode="numeric" value={ownPinConfirm} onChange={e => setOwnPinConfirm(e.target.value)} placeholder="اكتب الرقم الجديد تاني للتأكيد"
+                        className="w-full bg-indigo-700 text-white placeholder-indigo-300 border border-indigo-600 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-500" />
+                    <button onClick={handleChangeOwnPin} disabled={!ownPinCurrent || !ownPinNew || !ownPinConfirm}
+                        className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-indigo-950 font-bold py-2 rounded-lg transition-colors">
+                        حفظ رقمي الجديد
+                    </button>
                 </div>
 
                 <h3 className="text-lg font-semibold mt-6 mb-3 text-indigo-200">قائمة الخدام الحالية</h3>
