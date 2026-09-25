@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.25.v18';
+const APP_VERSION = '2026.09.25.v20';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -47,13 +47,8 @@ const isEarlyBadgeEligibleAt = (date = new Date()) => {
         parts.hour === 15 && parts.minute >= 0 && parts.minute < 15;
 };
 
-const isEarlyBadgeRecord = (record) => {
-    if (!record || record.type !== 'early') return false;
-    if (record.meta === 'early_badge_eligible') return true;
-    if (!record.recordedAt) return false;
-    const recordedAt = new Date(record.recordedAt);
-    return !Number.isNaN(recordedAt.getTime()) && isEarlyBadgeEligibleAt(recordedAt);
-};
+// أي "حضور مبكر" بيتحسب في وسام الحضور المبكر، في أي وقت اتسجل فيه يوم الجمعة
+const isEarlyBadgeRecord = (record) => Boolean(record && record.type === 'early');
 
 const getCairoMonthPrefixOffset = (offset, date = new Date()) => {
     const parts = getCairoDateParts(date);
@@ -75,41 +70,40 @@ const isFridayDateKey = (dateKey) => {
 
 const isFirstFridayDateKey = (dateKey) => isFridayDateKey(dateKey) && Number(dateKey.slice(8, 10)) <= 7;
 
+// إضافة النقط مسموحة يوم الجمعة بس، طول اليوم (من غير مواعيد).
+// أول جمعة في الشهر: القداس الشهري بدل الاجتماع.
 const getAttendanceWindow = (date = new Date()) => {
     const parts = getCairoDateParts(date);
     const dateKey = getCairoDateKey(date);
-    const firstFriday = isFirstFridayDateKey(dateKey);
 
-    if (firstFriday) {
+    if (isFirstFridayDateKey(dateKey)) {
         return {
             kind: 'monthlyMass',
-            isWithinAllowedTime: parts.hour >= 8 && parts.hour < 12,
-            message: '⚠️ الوقت الحالي ليس ضمن وقت القداس الشهري (8 ص–12 م)',
+            isWithinAllowedTime: true,
+            message: '',
         };
     }
 
     if (parts.weekday === 'Fri') {
         return {
-            // الحضور المبكر من 3:00 لـ 3:15 بس، وأي وقت بعد كده لحد 5 يعتبر متأخر
-            // (قبل كده كان بيعتبر لحد الساعة 4 "مبكر"، فالمتأخر كان مقفول من 3:15 لـ 4:00)
-            kind: (parts.hour === 15 && parts.minute < 15) ? 'early' : 'late',
-            isWithinAllowedTime: parts.hour >= 15 && parts.hour < 17,
-            message: '⚠️ الحضور المبكر (+10) متاح من 3:00 إلى 3:15 م فقط، والحضور المتأخر متاح بعد ذلك حتى 5 م.',
+            kind: 'meeting',
+            isWithinAllowedTime: true,
+            message: '',
         };
     }
 
     return {
         kind: 'none',
         isWithinAllowedTime: false,
-        message: '⚠️ الحضور متاح يوم الجمعة فقط.',
+        message: '⚠️ إضافة النقط متاحة يوم الجمعة بس.',
     };
 };
 
 const getMeetingTimeMessage = () => {
     const dateKey = getCairoDateKey();
-    if (isFirstFridayDateKey(dateKey)) return 'القداس الشهري: 8 ص–12 م';
-    if (isFridayDateKey(dateKey)) return 'الاجتماع: 3–5 م';
-    return 'الحضور يوم الجمعة فقط';
+    if (isFirstFridayDateKey(dateKey)) return 'القداس الشهري: متاح طول اليوم';
+    if (isFridayDateKey(dateKey)) return 'الاجتماع: إضافة النقط متاحة طول اليوم';
+    return 'إضافة النقط يوم الجمعة فقط';
 };
 
 // --- Current student roster whitelist (source rosters only) ---
@@ -925,9 +919,9 @@ const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = 
 
         return {
             canAddMass: targetIsFirstFriday && !hasReceivedMassThisMonth && meetingTimeAllowed,
-            canAddEarly: targetIsFriday && !targetIsFirstFriday && !hasReceivedAttendanceToday && meetingTimeAllowed && (!isHistoricalEdit ? currentWindow?.kind === 'early' && getCairoDateParts().hour === 15 && getCairoDateParts().minute < 15 : true),
-            canAddLate: targetIsFriday && !targetIsFirstFriday && !hasReceivedAttendanceToday && meetingTimeAllowed && (!isHistoricalEdit ? currentWindow?.kind === 'late' : true),
-            canAddConfession: canAddConfession,
+            canAddEarly: targetIsFriday && !targetIsFirstFriday && !hasReceivedAttendanceToday && meetingTimeAllowed,
+            canAddLate: targetIsFriday && !targetIsFirstFriday && !hasReceivedAttendanceToday && meetingTimeAllowed,
+            canAddConfession: canAddConfession && meetingTimeAllowed,
             canAddGamesStation: regularMeetingTimeAllowed && !hasReceivedGamesStationToday,
             canAddRoots: regularMeetingTimeAllowed && !hasReceivedRootsToday,
             canAddParticipation: regularMeetingTimeAllowed,
@@ -2073,17 +2067,23 @@ const App = () => {
         const dateToRecord = loggedInAdmin.isSuperAdmin && selectedDate && !fromScan ? selectedDate : getCairoDateKey();
         const isHistoricalEdit = loggedInAdmin.isSuperAdmin && Boolean(selectedDate) && selectedDate !== getCairoDateKey() && !fromScan;
 
-        if (['early', 'late', 'monthlyMass', 'participation', 'gamesStation', 'roots'].includes(type) && !isHistoricalEdit) {
+        if (!isHistoricalEdit) {
             const windowState = getAttendanceWindow();
-            const allowed = type === 'monthlyMass'
-                ? windowState.kind === 'monthlyMass' && windowState.isWithinAllowedTime
-                : type === 'early'
-                    ? windowState.kind === 'early' && windowState.isWithinAllowedTime && getCairoDateParts().hour === 15 && getCairoDateParts().minute < 15
-                    : type === 'late'
-                        ? windowState.kind === 'late' && windowState.isWithinAllowedTime
-                        : windowState.isWithinAllowedTime && windowState.kind !== 'monthlyMass';
-            if (!allowed) {
+            if (!windowState.isWithinAllowedTime) {
                 showToast(windowState.message);
+                return;
+            }
+            const allowed = type === 'monthlyMass'
+                ? windowState.kind === 'monthlyMass'
+                : (type === 'early' || type === 'late')
+                    ? windowState.kind === 'meeting'
+                    : (type === 'participation' || type === 'gamesStation' || type === 'roots')
+                        ? windowState.kind !== 'monthlyMass'
+                        : true;
+            if (!allowed) {
+                showToast(windowState.kind === 'monthlyMass'
+                    ? '⚠️ النهارده أول جمعة في الشهر (القداس الشهري)، مفيش حضور اجتماع.'
+                    : '⚠️ القداس الشهري بيتسجل في أول جمعة من الشهر بس.');
                 return;
             }
         }
