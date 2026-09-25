@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.24.v16';
+const APP_VERSION = '2026.09.25.v18';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -90,7 +90,9 @@ const getAttendanceWindow = (date = new Date()) => {
 
     if (parts.weekday === 'Fri') {
         return {
-            kind: parts.hour < 16 ? 'early' : 'late',
+            // الحضور المبكر من 3:00 لـ 3:15 بس، وأي وقت بعد كده لحد 5 يعتبر متأخر
+            // (قبل كده كان بيعتبر لحد الساعة 4 "مبكر"، فالمتأخر كان مقفول من 3:15 لـ 4:00)
+            kind: (parts.hour === 15 && parts.minute < 15) ? 'early' : 'late',
             isWithinAllowedTime: parts.hour >= 15 && parts.hour < 17,
             message: '⚠️ الحضور المبكر (+10) متاح من 3:00 إلى 3:15 م فقط، والحضور المتأخر متاح بعد ذلك حتى 5 م.',
         };
@@ -1468,6 +1470,95 @@ const commitAdminsMerge = (baseList, localList) => commitListMerge(ADMINS_DOC_RE
 
 const safeParseList = (str) => {
     try { const v = JSON.parse(str || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+};
+
+// ============================================================
+// تصدير Excel (.xlsx) حقيقي من غير أي مكتبة خارجية
+// ============================================================
+const XLSX_CRC_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        table[n] = c >>> 0;
+    }
+    return table;
+})();
+const xlsxCrc32 = (bytes) => {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) crc = XLSX_CRC_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+};
+const xlsxZip = (files) => {
+    const enc = new TextEncoder();
+    const chunks = [];
+    const central = [];
+    let offset = 0;
+    files.forEach(({ name, content }) => {
+        const nameBytes = enc.encode(name);
+        const data = enc.encode(content);
+        const crc = xlsxCrc32(data);
+        const local = new Uint8Array(30 + nameBytes.length);
+        const lv = new DataView(local.buffer);
+        lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x0800, true);
+        lv.setUint16(8, 0, true); lv.setUint16(10, 0, true); lv.setUint16(12, 0x21, true);
+        lv.setUint32(14, crc, true); lv.setUint32(18, data.length, true); lv.setUint32(22, data.length, true);
+        lv.setUint16(26, nameBytes.length, true); lv.setUint16(28, 0, true);
+        local.set(nameBytes, 30);
+        const cen = new Uint8Array(46 + nameBytes.length);
+        const cv = new DataView(cen.buffer);
+        cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+        cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true); cv.setUint16(12, 0, true); cv.setUint16(14, 0x21, true);
+        cv.setUint32(16, crc, true); cv.setUint32(20, data.length, true); cv.setUint32(24, data.length, true);
+        cv.setUint16(28, nameBytes.length, true); cv.setUint16(30, 0, true); cv.setUint16(32, 0, true);
+        cv.setUint16(34, 0, true); cv.setUint16(36, 0, true); cv.setUint32(38, 0, true); cv.setUint32(42, offset, true);
+        cen.set(nameBytes, 46);
+        chunks.push(local, data);
+        central.push(cen);
+        offset += local.length + data.length;
+    });
+    const centralSize = central.reduce((n, c) => n + c.length, 0);
+    const end = new Uint8Array(22);
+    const ev = new DataView(end.buffer);
+    ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+    ev.setUint32(12, centralSize, true); ev.setUint32(16, offset, true);
+    return new Blob([...chunks, ...central, end], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+};
+const xlsxEsc = (v) => String(v ?? '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const xlsxColName = (i) => { let s = ''; i += 1; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+const xlsxSheetXml = (rows, colWidths) => {
+    const cols = (colWidths || []).map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('');
+    const body = rows.map((row, r) => `<row r="${r + 1}">${row.map((cell, c) => {
+        const ref = `${xlsxColName(c)}${r + 1}`;
+        const style = r === 0 ? ' s="1"' : '';
+        if (typeof cell === 'number' && Number.isFinite(cell)) return `<c r="${ref}"${style}><v>${cell}</v></c>`;
+        return `<c r="${ref}" t="inlineStr"${style}><is><t xml:space="preserve">${xlsxEsc(cell)}</t></is></c>`;
+    }).join('')}</row>`).join('');
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView rightToLeft="1" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>${cols ? `<cols>${cols}</cols>` : ''}<sheetData>${body}</sheetData></worksheet>`;
+};
+const buildXlsx = (sheets) => {
+    const safeName = (n, i) => xlsxEsc(String(n || `Sheet${i + 1}`).replace(/[\\/?*[\]:]/g, ' ').slice(0, 31));
+    const files = [
+        { name: '[Content_Types].xml', content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>` },
+        { name: '_rels/.rels', content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+        { name: 'xl/workbook.xml', content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets>${sheets.map((s, i) => `<sheet name="${safeName(s.name, i)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>` },
+        { name: 'xl/_rels/workbook.xml.rels', content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
+        { name: 'xl/styles.xml', content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Arial"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF312E81"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>` },
+        ...sheets.map((s, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, content: xlsxSheetXml(s.rows, s.widths) })),
+    ];
+    return xlsxZip(files);
+};
+const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
 // --- App Component ---
@@ -2862,6 +2953,55 @@ const App = () => {
         return Object.values(stats).sort((a, b) => b.date.localeCompare(a.date));
     }, [students]);
 
+    // ===== تصدير سجل الحضور لملف Excel (للخدام والأدمنز) =====
+    const ATTENDANCE_TYPES = ['early', 'late', 'monthlyMass'];
+    const recordLabel = (h) => h?.typeName || h?.type || '';
+    const exportMeetingToExcel = (dateKey) => {
+        const sortAr = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+        const attended = students.filter(s => (s.attendanceHistory || []).some(h => h.date === dateKey && ATTENDANCE_TYPES.includes(h.type))).sort(sortAr);
+        const attendedIds = new Set(attended.map(s => s.id));
+        const absent = students.filter(s => !attendedIds.has(s.id)).sort(sortAr);
+        const presentRows = [['م', 'الاسم', 'المرحلة الدراسية', 'رقم الموبايل', 'نوع الحضور', 'نقاط اليوم', 'التفاصيل']];
+        attended.forEach((s, idx) => {
+            const recs = (s.attendanceHistory || []).filter(h => h.date === dateKey);
+            const att = recs.find(h => ATTENDANCE_TYPES.includes(h.type));
+            presentRows.push([
+                idx + 1, s.name || '', s.grade || '', s.phone || '', att ? recordLabel(att) : '',
+                recs.reduce((n, h) => n + Number(h.points || 0), 0),
+                recs.map(h => `${recordLabel(h)} (${Number(h.points) > 0 ? '+' : ''}${Number(h.points || 0)})${h.description ? ' - ' + h.description : ''}`).join(' | '),
+            ]);
+        });
+        const absentRows = [['م', 'الاسم', 'المرحلة الدراسية', 'رقم الموبايل']];
+        absent.forEach((s, idx) => absentRows.push([idx + 1, s.name || '', s.grade || '', s.phone || '']));
+        downloadBlob(buildXlsx([
+            { name: `الحضور (${attended.length})`, rows: presentRows, widths: [5, 28, 16, 15, 16, 11, 60] },
+            { name: `الغياب (${absent.length})`, rows: absentRows, widths: [5, 28, 16, 15] },
+        ]), `حضور_${dateKey}.xlsx`);
+        showToast('📥 تم تحميل ملف Excel');
+    };
+    const exportAllMeetingsToExcel = () => {
+        const dates = meetingsStats.map(m => m.date).sort();
+        const sortAr = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+        const sorted = [...students].sort(sortAr);
+        const summary = [['م', 'الاسم', 'المرحلة الدراسية', 'رقم الموبايل', ...dates, 'عدد مرات الحضور', 'نقاط السنة دي', 'نقاط السنين السابقة', 'المجموع الكلي']];
+        sorted.forEach((s, idx) => {
+            const hist = s.attendanceHistory || [];
+            const marks = dates.map(d => hist.some(h => h.date === d && ATTENDANCE_TYPES.includes(h.type)) ? '✓' : '');
+            summary.push([idx + 1, s.name || '', s.grade || '', s.phone || '', ...marks,
+                marks.filter(Boolean).length, Number(s.points || 0), Number(s.previousYearsPoints || 0), getStudentTotalPoints(s)]);
+        });
+        const details = [['التاريخ', 'الاسم', 'المرحلة الدراسية', 'النوع', 'النقاط', 'التفاصيل', 'سجّله']];
+        sorted.forEach(s => (s.attendanceHistory || []).forEach(h => {
+            details.push([h.date || '', s.name || '', s.grade || '', recordLabel(h), Number(h.points || 0), h.description || '', h.recordedBy || '']);
+        }));
+        details.splice(1, details.length - 1, ...details.slice(1).sort((a, b) => String(b[0]).localeCompare(String(a[0])) || String(a[1]).localeCompare(String(b[1]), 'ar')));
+        downloadBlob(buildXlsx([
+            { name: 'ملخص الحضور', rows: summary, widths: [5, 28, 16, 15, ...dates.map(() => 12), 14, 13, 16, 13] },
+            { name: 'كل السجلات', rows: details, widths: [12, 28, 16, 22, 9, 40, 16] },
+        ]), `سجل_الحضور_${getCairoDateKey()}.xlsx`);
+        showToast('📥 تم تحميل ملف Excel');
+    };
+
     const { superAdmin, otherAdmins } = useMemo(() => {
         const superAdmin = admins.find(a => a.isSuperAdmin);
         const otherAdmins = admins.filter(a => !a.isSuperAdmin);
@@ -3262,10 +3402,18 @@ const App = () => {
                                     <div key={student.id} id={`student-card-${student.id}`} className={`bg-indigo-900/70 rounded-xl shadow-md border overflow-hidden ${hasAllMonthly ? 'border-amber-400/80 shadow-amber-500/10 ring-1 ring-amber-400/20' : 'border-indigo-800/50'}`}>
                                         <div className="p-4 flex justify-between items-center cursor-pointer hover:bg-indigo-800/50 transition-colors" onClick={() => toggleStudentDetails(student.id)}>
                                             <div className='flex items-center gap-4 flex-wrap'>
-                                                <div className="flex flex-col items-center justify-center min-w-[96px] leading-tight">
-                                                    <div className="text-amber-400 font-bold text-xl">{student.points || 0}</div>
-                                                    <div className="text-[9px] text-sky-300/90 font-bold text-center mt-1 whitespace-nowrap">
-                                                        نقاط السنين السابقة: {student.previousYearsPoints || 0}
+                                                <div className="flex flex-col min-w-[124px] rounded-xl bg-indigo-950/60 border border-indigo-700/50 overflow-hidden text-center leading-tight">
+                                                    <div className="px-2 pt-1.5 pb-1">
+                                                        <div className="text-[10px] text-amber-200/80 font-bold">نقاط السنة دي</div>
+                                                        <div className="text-amber-400 font-black text-2xl">{student.points || 0}</div>
+                                                    </div>
+                                                    <div className="px-2.5 py-1 border-t border-indigo-700/40 flex items-center justify-between gap-2">
+                                                        <span className="text-[10px] text-sky-300/90 font-bold whitespace-nowrap">السنين السابقة</span>
+                                                        <span className="text-sky-300 font-black text-sm">{student.previousYearsPoints || 0}</span>
+                                                    </div>
+                                                    <div className="px-2.5 py-1 bg-emerald-500/10 border-t border-emerald-400/30 flex items-center justify-between gap-2">
+                                                        <span className="text-[10px] text-emerald-200 font-black whitespace-nowrap">المجموع الكلي</span>
+                                                        <span className="text-emerald-300 font-black text-base">{getStudentTotalPoints(student)}</span>
                                                     </div>
                                                     {isMinaAdmin && (
                                                         <button
@@ -3274,19 +3422,12 @@ const App = () => {
                                                                 e.stopPropagation();
                                                                 handleEditStudent(student);
                                                             }}
-                                                            className="mt-1 text-[9px] text-amber-300 hover:text-amber-200 font-black underline underline-offset-2"
+                                                            className="py-1 border-t border-indigo-700/40 text-[10px] text-amber-300 hover:text-amber-200 hover:bg-indigo-800/40 font-black"
                                                             title="تعديل نقاط السنين السابقة"
                                                         >
                                                             ✏️ تعديل السنين السابقة
                                                         </button>
                                                     )}
-                                                    <div className="mt-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-400/30 text-center whitespace-nowrap">
-                                                        <div className="text-[9px] text-emerald-200 font-black leading-none">TOTAL POINTS</div>
-                                                        <div className="text-lg text-emerald-300 font-black leading-tight">
-                                                            {getStudentTotalPoints(student)}
-                                                        </div>
-                                                        <div className="text-[8px] text-emerald-200/70 font-semibold leading-none">السابق + الحالي</div>
-                                                    </div>
                                                 </div>
                                                 <span className="text-lg font-semibold flex items-center gap-2 flex-wrap">
                                                     <span>{student.name}</span>
@@ -4204,6 +4345,15 @@ const App = () => {
 
                     {activeView === 'attendance_summary' && (
                         <div className="space-y-4 animate-fade-in-out">
+                            {isAuthenticated && meetingsStats.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={exportAllMeetingsToExcel}
+                                    className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-md transition-colors"
+                                >
+                                    📥 تحميل سجل الحضور كله (Excel)
+                                </button>
+                            )}
                             {meetingsStats.length === 0 ? (
                                 <p className="text-center text-indigo-300 mt-10">لا توجد سجلات حضور حتى الآن.</p>
                             ) : (
@@ -4225,6 +4375,15 @@ const App = () => {
                                         </div>
                                         {expandedDate === stat.date && (
                                             <div className="px-4 pb-4 pt-2 border-t border-indigo-800/50 bg-indigo-900/90">
+                                                {isAuthenticated && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); exportMeetingToExcel(stat.date); }}
+                                                        className="w-full mb-3 flex items-center justify-center gap-2 bg-emerald-600/90 hover:bg-emerald-600 text-white text-sm font-bold py-2 rounded-lg transition-colors"
+                                                    >
+                                                        📥 تحميل حضور وغياب الاجتماع ده (Excel)
+                                                    </button>
+                                                )}
                                                 <h4 className="text-sm font-semibold text-indigo-200 mb-2">أسماء الحضور ({stat.uniqueAttendees.size}):</h4>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                                     {students
@@ -4247,8 +4406,13 @@ const App = () => {
                                                                 >
                                                                     <div className="flex items-center justify-between">
                                                                         <div className="flex items-center gap-2">
-                                                                            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                                                                            <div className="w-2 h-2 rounded-full bg-green-500 shrink-0"></div>
                                                                             <span className="text-white font-semibold">{s.name}</span>
+                                                                            {s.grade && (
+                                                                                <span className="bg-sky-500/15 text-sky-300 border border-sky-400/30 font-black text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap">
+                                                                                    🎓 {s.grade}
+                                                                                </span>
+                                                                            )}
                                                                         </div>
                                                                         <div className="flex items-center gap-1.5 font-mono">
                                                                             <span className={`font-bold ${dailyPoints > 0 ? 'text-amber-400' : 'text-gray-400'}`}>
