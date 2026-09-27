@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.25.v20';
+const APP_VERSION = '2026.09.26.v21';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -778,14 +778,16 @@ const BarcodeDisplay = ({ studentId }) => {
     );
 };
 
+// الجنيهات = نص النقط، وبتتغير أوتوماتيك مع النقط.
+// لو مينا زوّد أو نقّص جنيهات يدوي، بيتحفظ كـ"فرق" (moneyOffset) فوق الحساب ده،
+// فالجنيهات بتفضل ماشية مع النقط بعد كده بدل ما تتثبت على رقم واحد.
+// (customMoney القديم كان بيثبّت الرقم نهائيًا، فبقى متجاهَل.)
+const getBaseMoney = (pts) => Math.floor((Number(pts) || 0) / 2);
 const getStudentMoney = (student) => {
     if (!student) return 0;
-    if (student.customMoney !== undefined && student.customMoney !== null && student.customMoney !== '') {
-        const val = parseFloat(student.customMoney);
-        if (!isNaN(val)) return val;
-    }
     const pts = student.pointsForLeaderboard ?? student.points ?? 0;
-    return Math.floor(pts / 2);
+    const offset = Number(student.moneyOffset) || 0;
+    return Math.max(0, getBaseMoney(pts) + offset);
 };
 
 
@@ -3193,13 +3195,22 @@ const App = () => {
             recordedBy: loggedInAdmin.name,
         } : null;
 
+        const newPts = Math.max(0, currentPts + diff);
+        // الجنيهات اللي اتكتبت في الخانة: لو هي نفس الحساب العادي للنقط الجديدة، يبقى مفيش تعديل يدوي
+        const autoMoneyForOldPts = getBaseMoney(currentPts) + (Number(studentForPointsEdit.moneyOffset) || 0);
+        const moneyUntouched = Math.round(moneyVal) === Math.round(autoMoneyForOldPts);
+        const newOffset = moneyUntouched
+            ? (Number(studentForPointsEdit.moneyOffset) || 0)   // مالمسش الجنيهات: سيب الفرق القديم زي ما هو
+            : Math.round(moneyVal) - getBaseMoney(newPts);       // عدّلها يدوي: احفظ الفرق عن الحساب العادي
+
         const updatedList = students.map(s => {
             if (s.id === studentForPointsEdit.id) {
                 const history = s.attendanceHistory || [];
+                const { customMoney, moneyOffset, ...rest } = s;
                 return {
-                    ...s,
+                    ...rest,
                     points: Math.max(0, (s.points || 0) + diff),
-                    customMoney: moneyVal,
+                    ...(newOffset !== 0 ? { moneyOffset: newOffset } : {}),
                     attendanceHistory: newRecord ? [newRecord, ...history] : history
                 };
             }
@@ -3207,7 +3218,7 @@ const App = () => {
         });
         saveStudentsData(updatedList);
 
-        setToastMessage(`✨ تم تعديل رصيد ${studentForPointsEdit.name} إلى ${ptsVal} نقطة و (${moneyVal} جنيه) بنجاح!`);
+        setToastMessage(`✨ تم تعديل رصيد ${studentForPointsEdit.name} إلى ${ptsVal} نقطة و (${Math.max(0, getBaseMoney(newPts) + newOffset)} جنيه) بنجاح!`);
         setTimeout(() => setToastMessage(null), 4000);
         setStudentForPointsEdit(null);
     };
@@ -5178,9 +5189,9 @@ const App = () => {
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40"><label className="block text-xs font-bold text-amber-300 mb-2">عدد النقاط المطلوب 🎯</label><div className="relative"><input type="number" value={targetPointsInput} onChange={(e) => handlePointsInputChange(e.target.value)} placeholder="مثال: 100" className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right" /><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">نقطة</span></div></div>
-                            <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40"><label className="block text-xs font-bold text-amber-300 mb-2">القيمة بالجنيه 💰 (مستقلة تماماً)</label><div className="relative"><input type="number" value={targetMoneyInput} onChange={(e) => handleMoneyInputChange(e.target.value)} placeholder="مثال: 50" className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right" /><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">جنيه</span></div></div>
+                            <div className="bg-indigo-900/40 p-4 rounded-xl border border-indigo-800/40"><label className="block text-xs font-bold text-amber-300 mb-2">القيمة بالجنيه 💰</label><div className="relative"><input type="number" value={targetMoneyInput} onChange={(e) => handleMoneyInputChange(e.target.value)} placeholder="مثال: 50" className="w-full bg-indigo-950 text-white font-extrabold text-lg px-3 py-2.5 rounded-lg border border-indigo-700 focus:outline-none focus:border-amber-500 text-right" /><span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-indigo-400 font-bold">جنيه</span></div></div>
                         </div>
-                        <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-xl text-xs text-amber-200/90 leading-relaxed">💡 <span className="font-bold text-amber-300">تنويه:</span> النقاط والجنيهات منفصلان تماماً. يمكنك إدخال أي عدد نقاط وأي مبلغ بالجنيه بشكل مستقل دون تأثر إحداهما بالأخرى.</div>
+                        <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-xl text-xs text-amber-200/90 leading-relaxed">💡 <span className="font-bold text-amber-300">تنويه:</span> الجنيهات = نص النقط وبتتغير لوحدها مع النقط. لو غيّرت الجنيهات بإيدك، الفرق ده بيتحفظ وبيفضل ماشي مع النقط بعد كده.</div>
                         <div className="flex gap-3 pt-2">
                             <button onClick={handleSavePointsEdit} className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-indigo-950 font-black py-3 rounded-xl transition-all text-sm shadow-md active:scale-[0.98]">حفظ التغييرات 💾</button>
                             <button onClick={() => setStudentForPointsEdit(null)} className="px-5 bg-indigo-900 hover:bg-indigo-800 text-indigo-200 font-bold py-3 rounded-xl transition-all text-sm">إلغاء</button>
