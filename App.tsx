@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction, deleteField } from 'firebase/f
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.10.01.v28';
+const APP_VERSION = '2026.10.01.v29';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -1633,10 +1633,11 @@ const App = () => {
     const [leaderboardFilter, setLeaderboardFilter] = useState('all'); // 'all', 'current_month', 'prev_month'
     // الافتقاد: مين مسئول عن كل ولد، ومين اتافتقد (متخزن في appData/followup_v1)
     const [followup, setFollowup] = useState<{ assignments: Record<string, string>; contacts: Record<string, any> }>({ assignments: {}, contacts: {} });
-    const [followupMinAbsences, setFollowupMinAbsences] = useState(2);
-    const [followupScope, setFollowupScope] = useState('mine'); // 'mine' | 'all' | 'unassigned'
-    const [followupGrade, setFollowupGrade] = useState('all'); // 'all' أو اسم الصف
+    const [followupTab, setFollowupTab] = useState('mine'); // 'mine' | 'report' | 'groups'
+    const [followupGrade, setFollowupGrade] = useState('أولى ثانوي');
     const [followupAssignPickerOpen, setFollowupAssignPickerOpen] = useState(false);
+    const [followupReassignAll, setFollowupReassignAll] = useState(false);
+    const [expandedReportServant, setExpandedReportServant] = useState('');
     const [followupAssignServants, setFollowupAssignServants] = useState<string[]>([]);
     const [selectedBadgeDetail, setSelectedBadgeDetail] = useState(null);
     
@@ -3015,6 +3016,8 @@ const App = () => {
     }, [students]);
 
     // ===== الافتقاد =====
+    // كل خادم ليه "مجموعة" ثابتة من الأولاد (مينا بيوزّعها بالصف). كل أسبوع، الخادم بيشوف
+    // اللي غابوا من مجموعته في آخر اجتماع ويفتقدهم من الموقع، ومينا بيشوف تقرير بكل خادم.
     const FOLLOWUP_DOC_REF = () => doc(db, 'appData', 'followup_v1');
     useEffect(() => {
         const unsub = onSnapshot(FOLLOWUP_DOC_REF(), (snap) => {
@@ -3036,10 +3039,10 @@ const App = () => {
     }, [meetingsStats]);
     const latestMeetingDate = followupMeetings[0]?.date || '';
 
-    // كل ولد غاب آخر X اجتماعات ورا بعض أو أكتر
-    const followupAll = useMemo(() => {
-        if (followupMeetings.length === 0) return [];
-        return students.map(s => {
+    // لكل ولد: غايب كام اجتماع ورا بعض لحد آخر اجتماع، وآخر مرة حضر إمتى
+    const followupInfo = useMemo(() => {
+        const map: Record<string, { streak: number; lastAttendedDate: string; missedAll: boolean }> = {};
+        students.forEach(s => {
             let streak = 0;
             for (const m of followupMeetings) {
                 if (m.attendees.has(s.id)) break;
@@ -3048,17 +3051,11 @@ const App = () => {
             const lastAttendedDate = (s.attendanceHistory || [])
                 .filter(h => ['early', 'late', 'monthlyMass'].includes(h.type) && h.date)
                 .map(h => h.date).sort().pop() || '';
-            return { student: s, streak, lastAttendedDate, missedAll: streak === followupMeetings.length };
-        })
-            .filter(x => x.streak >= followupMinAbsences)
-            .sort((a, b) => b.streak - a.streak || String(a.student.name).localeCompare(String(b.student.name), 'ar'));
-    }, [students, followupMeetings, followupMinAbsences]);
+            map[s.id] = { streak, lastAttendedDate, missedAll: followupMeetings.length > 0 && streak === followupMeetings.length };
+        });
+        return map;
+    }, [students, followupMeetings]);
 
-    const isFollowupContacted = (studentId) => {
-        const c = followup.contacts?.[studentId];
-        return Boolean(c && c.date && latestMeetingDate && c.date >= latestMeetingDate);
-    };
-    // الصفوف (أولى/تانية/تالتة ثانوي...) بالترتيب
     const followupGrades = useMemo(() => {
         const order = ['أولى ثانوي', 'تانية ثانوي', 'تالتة ثانوي'];
         const found: string[] = [...new Set<string>(students.map(s => String(s.grade || '').trim()).filter(Boolean))];
@@ -3067,54 +3064,92 @@ const App = () => {
             return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b, 'ar');
         });
     }, [students]);
-    const inFollowupGrade = (x) => followupGrade === 'all' || String(x.student.grade || '').trim() === followupGrade;
-    const myFollowupAllGrades = useMemo(() => followupAll.filter(x => loggedInAdmin && followup.assignments?.[x.student.id] === loggedInAdmin.id), [followupAll, followup, loggedInAdmin]);
-    const myFollowup = useMemo(() => myFollowupAllGrades.filter(inFollowupGrade), [myFollowupAllGrades, followupGrade]);
-    const unassignedFollowup = useMemo(() => followupAll.filter(inFollowupGrade).filter(x => !followup.assignments?.[x.student.id] || !admins.some(a => a.id === followup.assignments[x.student.id])), [followupAll, followup, admins, followupGrade]);
-    const followupInGrade = useMemo(() => followupAll.filter(inFollowupGrade), [followupAll, followupGrade]);
-    const myPendingFollowupCount = myFollowupAllGrades.filter(x => !isFollowupContacted(x.student.id)).length;
 
+    const assignedServantId = (studentId) => {
+        const id = followup.assignments?.[studentId];
+        return id && admins.some(a => a.id === id) ? id : '';
+    };
+    const isAbsentNow = (studentId) => (followupInfo[studentId]?.streak || 0) >= 1;
+    const isFollowupContacted = (studentId) => {
+        const c = followup.contacts?.[studentId];
+        return Boolean(c && c.date && latestMeetingDate && c.date >= latestMeetingDate);
+    };
+    const byAbsence = (a, b) => (followupInfo[b.id]?.streak || 0) - (followupInfo[a.id]?.streak || 0) || String(a.name).localeCompare(String(b.name), 'ar');
+
+    const myFollowupGroup = useMemo(() => students.filter(s => loggedInAdmin && assignedServantId(s.id) === loggedInAdmin.id), [students, followup, admins, loggedInAdmin]);
+    const myFollowupAbsent = useMemo(() => myFollowupGroup.filter(s => isAbsentNow(s.id)).sort(byAbsence), [myFollowupGroup, followupInfo]);
+    const myPendingFollowupCount = myFollowupAbsent.filter(s => !isFollowupContacted(s.id)).length;
+
+    // تقرير مينا: لكل خادم، مجموعته، والغايبين منها، وافتقد كام، وآخر مرة استخدم الافتقاد
+    const followupReport = useMemo(() => {
+        return admins.map(a => {
+            const group = students.filter(s => assignedServantId(s.id) === a.id);
+            const absent = group.filter(s => isAbsentNow(s.id)).sort(byAbsence);
+            const done = absent.filter(s => isFollowupContacted(s.id));
+            const lastActivity = Object.values(followup.contacts || {})
+                .filter((c: any) => c && c.byId === a.id && c.at)
+                .map((c: any) => c.at).sort().pop() || '';
+            return { admin: a, group, absent, done, lastActivity };
+        }).filter(r => r.group.length > 0)
+            .sort((x, y) => (x.absent.length ? x.done.length / x.absent.length : 1) - (y.absent.length ? y.done.length / y.absent.length : 1));
+    }, [admins, students, followup, followupInfo, latestMeetingDate]);
+    const unassignedAbsentCount = students.filter(s => !assignedServantId(s.id) && isAbsentNow(s.id)).length;
+    const unassignedCount = students.filter(s => !assignedServantId(s.id)).length;
+
+    const recordFollowupContact = (studentId, method) => {
+        if (!loggedInAdmin) return;
+        setDoc(FOLLOWUP_DOC_REF(), {
+            contacts: { [studentId]: { date: getCairoDateKey(), by: loggedInAdmin.name, byId: loggedInAdmin.id, method, at: new Date().toISOString() } },
+        }, { merge: true }).catch(err => { console.error(err); showToast('⚠️ فشل الحفظ، جرّب تاني.'); });
+    };
+    const toggleFollowupContacted = (studentId) => {
+        if (!loggedInAdmin) return;
+        if (isFollowupContacted(studentId)) {
+            setDoc(FOLLOWUP_DOC_REF(), { contacts: { [studentId]: deleteField() } }, { merge: true })
+                .then(() => showToast('اتشالت علامة الافتقاد.'))
+                .catch(err => { console.error(err); showToast('⚠️ فشل الحفظ، جرّب تاني.'); });
+        } else {
+            recordFollowupContact(studentId, 'manual');
+            showToast('✅ اتسجل إنه اتافتقد.');
+        }
+    };
     const assignFollowup = (studentId, adminId) => {
         if (!loggedInAdmin?.isSuperAdmin) return;
         setDoc(FOLLOWUP_DOC_REF(), { assignments: { [studentId]: adminId ? adminId : deleteField() } }, { merge: true })
             .catch(err => { console.error(err); showToast('⚠️ فشل حفظ التوزيع، جرّب تاني.'); });
     };
-    const toggleFollowupContacted = (studentId) => {
-        if (!loggedInAdmin) return;
-        const done = isFollowupContacted(studentId);
-        setDoc(FOLLOWUP_DOC_REF(), {
-            contacts: { [studentId]: done ? deleteField() : { date: getCairoDateKey(), by: loggedInAdmin.name, at: new Date().toISOString() } },
-        }, { merge: true })
-            .then(() => showToast(done ? 'اتشالت علامة الافتقاد.' : '✅ اتسجل إنه اتافتقد.'))
-            .catch(err => { console.error(err); showToast('⚠️ فشل الحفظ، جرّب تاني.'); });
-    };
-    // توزيع تلقائي: الأولاد اللي مالهمش خادم في الصف المختار، بالتساوي على الخدام اللي إنت تختارهم.
-    // الترتيب بالغياب الأول، فكل خادم بياخد شوية غايبين كتير وشوية غايبين قليل.
-    const openFollowupAutoAssign = () => {
+
+    // توزيع مجموعات صف كامل على خدام بيختارهم مينا، بالتساوي، وكل خادم بياخد خليط
+    // (اللي بيحضروا، واللي بيغيبوا شوية، واللي بيغيبوا كتير)
+    const openGroupDistribution = (reassignAll) => {
         if (!loggedInAdmin?.isSuperAdmin) return;
-        if (unassignedFollowup.length === 0) { showToast('كل الأولاد في القايمة دي ليهم خدام بالفعل.'); return; }
-        // اختيار مبدئي: الخدام اللي عليهم أولاد في نفس الصف ده قبل كده
-        const usedInGrade = [...new Set(followupInGrade.map(x => followup.assignments?.[x.student.id]).filter(id => id && admins.some(a => a.id === id)))];
-        setFollowupAssignServants(usedInGrade as string[]);
+        const gradeStudents = students.filter(s => String(s.grade || '').trim() === followupGrade);
+        const used = [...new Set(gradeStudents.map(s => assignedServantId(s.id)).filter(Boolean))] as string[];
+        setFollowupReassignAll(Boolean(reassignAll));
+        setFollowupAssignServants(used);
         setFollowupAssignPickerOpen(true);
     };
-    const runFollowupAutoAssign = () => {
+    const runGroupDistribution = () => {
         if (!loggedInAdmin?.isSuperAdmin) return;
         const servants = admins.filter(a => followupAssignServants.includes(a.id));
         if (servants.length === 0) { showToast('اختار خادم واحد على الأقل.'); return; }
-        const load = Object.fromEntries(servants.map(a => [a.id, followupInGrade.filter(x => followup.assignments?.[x.student.id] === a.id).length]));
-        const updates: Record<string, string> = {};
+        const gradeStudents = students.filter(s => String(s.grade || '').trim() === followupGrade);
+        const toAssign = gradeStudents.filter(s => followupReassignAll || !assignedServantId(s.id)).sort(byAbsence);
+        if (toAssign.length === 0) { showToast('كل أولاد الصف ده ليهم خدام بالفعل.'); return; }
+        if (followupReassignAll && !window.confirm(`هيتعاد توزيع كل أولاد ${followupGrade} (${toAssign.length} ولد) على: ${servants.map(a => a.name).join('، ')}.\n\nالمجموعات القديمة للصف ده هتتغير. تكمل؟`)) return;
+        const load = Object.fromEntries(servants.map(a => [a.id, followupReassignAll ? 0 : gradeStudents.filter(s => assignedServantId(s.id) === a.id).length]));
+        const updates: Record<string, any> = {};
+        if (followupReassignAll) gradeStudents.forEach(s => { updates[s.id] = deleteField(); });
         let turn = 0;
-        unassignedFollowup.forEach(x => {
+        toAssign.forEach(s => {
             const order = servants.slice(turn).concat(servants.slice(0, turn));
             const pick = order.reduce((best, a) => (load[a.id] < load[best.id] ? a : best), order[0]);
-            updates[x.student.id] = pick.id;
+            updates[s.id] = pick.id;
             load[pick.id]++;
             turn = (turn + 1) % servants.length;
         });
-        const count = unassignedFollowup.length;
         setDoc(FOLLOWUP_DOC_REF(), { assignments: updates }, { merge: true })
-            .then(() => { showToast(`✅ اتوزع ${count} ولد على ${servants.map(a => a.name).join('، ')}.`); setFollowupAssignPickerOpen(false); })
+            .then(() => { showToast(`✅ اتوزع ${toAssign.length} ولد من ${followupGrade} على ${servants.map(a => a.name).join('، ')}.`); setFollowupAssignPickerOpen(false); })
             .catch(err => { console.error(err); showToast('⚠️ فشل التوزيع، جرّب تاني.'); });
     };
 
@@ -4580,151 +4615,238 @@ const App = () => {
                     
 
                     {activeView === 'followup' && loggedInAdmin && (() => {
-                        const scoped = followupScope === 'all' ? followupInGrade
-                            : followupScope === 'unassigned' ? unassignedFollowup
-                            : myFollowup;
-                        const doneCount = scoped.filter(x => isFollowupContacted(x.student.id)).length;
-                        const adminName = (id) => admins.find(a => a.id === id)?.name || '';
-                        const chip = (active) => `px-3 py-1.5 rounded-full text-xs font-black border transition-colors ${active ? 'bg-amber-500 text-indigo-950 border-amber-400' : 'bg-indigo-900/60 text-indigo-200 border-indigo-700 hover:bg-indigo-800'}`;
+                        const isBoss = Boolean(loggedInAdmin.isSuperAdmin);
+                        const tab = isBoss ? followupTab : 'mine';
+                        const fmt = (d, opts: any = { day: 'numeric', month: 'long' }) => d ? formatCairoDateKeyAr(d, opts) : '';
+                        const fmtAt = (iso) => {
+                            if (!iso) return '';
+                            const d = new Date(iso);
+                            return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ar-EG', { timeZone: 'Africa/Cairo', weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' });
+                        };
+                        const methodLabel = (m) => m === 'whatsapp' ? 'واتساب' : m === 'call' ? 'مكالمة' : 'يدوي';
+                        const tabBtn = (id, label) => (
+                            <button type="button" onClick={() => setFollowupTab(id)}
+                                className={`flex-1 py-2 rounded-lg text-sm font-black transition-colors ${tab === id ? 'bg-amber-500 text-indigo-950' : 'text-indigo-200 hover:bg-indigo-800/60'}`}>{label}</button>
+                        );
+                        const bar = (done, total) => {
+                            const pct = total ? Math.round((done / total) * 100) : 100;
+                            const color = pct >= 100 ? 'bg-emerald-500' : pct > 0 ? 'bg-amber-500' : 'bg-red-500';
+                            return <div className="h-2 bg-indigo-950 rounded-full overflow-hidden"><div className={`h-full ${color} transition-all`} style={{ width: `${Math.max(pct, total ? 4 : 100)}%` }} /></div>;
+                        };
+
+                        // كارت ولد غايب (بيستخدم في "افتقادي")
+                        const renderStudentCard = (s) => {
+                            const info = followupInfo[s.id] || { streak: 0, lastAttendedDate: '', missedAll: false };
+                            const done = isFollowupContacted(s.id);
+                            const contact = followup.contacts?.[s.id];
+                            const wa = toWhatsAppNumber(s.phone);
+                            const firstName = String(s.name || '').split(' ')[0];
+                            const waText = encodeURIComponent(`أهلاً يا ${firstName} 👋 وحشتنا في الاجتماع! مستنيينك الجمعة الجاية إن شاء الله 🙏`);
+                            return (
+                                <div key={s.id} className={`rounded-2xl border p-3.5 space-y-2.5 ${done ? 'bg-emerald-900/20 border-emerald-600/40' : 'bg-indigo-900/50 border-indigo-700/50'}`}>
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                            <div className="font-bold text-white">{s.name}</div>
+                                            <div className="text-[11px] text-indigo-300 mt-0.5">
+                                                {s.grade ? `${s.grade} • ` : ''}{info.lastAttendedDate ? `آخر حضور ${fmt(info.lastAttendedDate)}` : 'ماحضرش السنة دي'}
+                                            </div>
+                                        </div>
+                                        <span className="shrink-0 bg-red-500/15 text-red-300 border border-red-400/30 text-[11px] font-black px-2 py-0.5 rounded-full whitespace-nowrap">
+                                            {info.streak === 1 ? 'غاب آخر اجتماع' : `غايب ${info.streak} اجتماعات`}
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {wa ? (
+                                            <a href={`https://wa.me/${wa}?text=${waText}`} target="_blank" rel="noopener noreferrer" onClick={() => recordFollowupContact(s.id, 'whatsapp')}
+                                                className="flex items-center justify-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-2 rounded-lg">
+                                                <WhatsAppIcon className="w-4 h-4" /> واتساب
+                                            </a>
+                                        ) : <span className="flex items-center justify-center bg-indigo-950/60 text-indigo-400 text-[11px] font-bold py-2 rounded-lg">مفيش رقم</span>}
+                                        {wa ? (
+                                            <a href={`tel:${s.phone}`} onClick={() => recordFollowupContact(s.id, 'call')}
+                                                className="flex items-center justify-center gap-1 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold py-2 rounded-lg">📞 اتصال</a>
+                                        ) : <span className="flex items-center justify-center bg-indigo-950/60 text-indigo-400 text-[11px] font-bold py-2 rounded-lg">—</span>}
+                                        <button type="button" onClick={() => toggleFollowupContacted(s.id)}
+                                            className={`text-xs font-bold py-2 rounded-lg ${done ? 'bg-emerald-600 text-white' : 'bg-indigo-700 hover:bg-indigo-600 text-indigo-100'}`}>
+                                            {done ? '✅ اتافتقد' : 'افتقدته'}
+                                        </button>
+                                    </div>
+                                    {done && contact && (
+                                        <div className="text-[11px] text-emerald-300">اتافتقد ({methodLabel(contact.method)}) {fmt(contact.date, { weekday: 'long', day: 'numeric', month: 'long' })} بواسطة {contact.by}</div>
+                                    )}
+                                </div>
+                            );
+                        };
+
                         return (
                             <div className="space-y-4 animate-fade-in-out">
-                                <div className="bg-indigo-900/60 border border-indigo-700/60 rounded-2xl p-4 space-y-3">
+                                <div className="bg-indigo-900/60 border border-indigo-700/60 rounded-2xl p-4 space-y-2">
                                     <div className="flex items-center justify-between gap-3 flex-wrap">
                                         <h2 className="text-lg font-black text-amber-400">📞 افتقاد</h2>
-                                        {latestMeetingDate && (
-                                            <span className="text-[11px] text-indigo-300">آخر اجتماع: {formatCairoDateKeyAr(latestMeetingDate, { day: 'numeric', month: 'long' })}</span>
-                                        )}
+                                        {latestMeetingDate && <span className="text-[11px] text-indigo-300">آخر اجتماع: {fmt(latestMeetingDate, { weekday: 'long', day: 'numeric', month: 'long' })}</span>}
                                     </div>
-                                    <p className="text-xs text-indigo-300 leading-relaxed">الأولاد اللي غابوا آخر اجتماعات ورا بعض. علامة "اتافتقد" بتتصفّر لوحدها بعد كل اجتماع جديد.</p>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-xs text-indigo-200 font-bold">الصف:</span>
-                                        <button type="button" onClick={() => setFollowupGrade('all')} className={chip(followupGrade === 'all')}>كل الصفوف ({followupAll.length})</button>
-                                        {followupGrades.map(g => (
-                                            <button key={g} type="button" onClick={() => setFollowupGrade(g)} className={chip(followupGrade === g)}>
-                                                {g} ({followupAll.filter(x => String(x.student.grade || '').trim() === g).length})
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-xs text-indigo-200 font-bold">غاب:</span>
-                                        {[1, 2, 3, 4].map(n => (
-                                            <button key={n} type="button" onClick={() => setFollowupMinAbsences(n)} className={chip(followupMinAbsences === n)}>
-                                                {n === 1 ? 'آخر اجتماع' : `${n}+ اجتماعات`}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <button type="button" onClick={() => setFollowupScope('mine')} className={chip(followupScope === 'mine')}>اللي عليّا ({myFollowup.length})</button>
-                                        <button type="button" onClick={() => setFollowupScope('all')} className={chip(followupScope === 'all')}>الكل ({followupInGrade.length})</button>
-                                        <button type="button" onClick={() => setFollowupScope('unassigned')} className={chip(followupScope === 'unassigned')}>من غير خادم ({unassignedFollowup.length})</button>
-                                    </div>
-                                    {scoped.length > 0 && (
-                                        <div>
-                                            <div className="flex justify-between text-[11px] text-indigo-300 mb-1"><span>اتافتقد {doneCount} من {scoped.length}</span><span>{Math.round((doneCount / scoped.length) * 100)}%</span></div>
-                                            <div className="h-2 bg-indigo-950 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${(doneCount / scoped.length) * 100}%` }} /></div>
-                                        </div>
-                                    )}
-                                    {loggedInAdmin.isSuperAdmin && unassignedFollowup.length > 0 && (
-                                        <button type="button" onClick={openFollowupAutoAssign} className="w-full bg-sky-600 hover:bg-sky-700 text-white font-bold py-2.5 rounded-xl text-sm">
-                                            🔀 توزيع {followupGrade === 'all' ? '' : followupGrade + ' '}على الخدام ({unassignedFollowup.length} ولد من غير خادم)
-                                        </button>
-                                    )}
-                                    {followupAssignPickerOpen && loggedInAdmin.isSuperAdmin && (
-                                        <div className="bg-indigo-950/80 border border-sky-500/40 rounded-xl p-3 space-y-2">
-                                            <p className="text-sm font-bold text-sky-300">
-                                                اختار الخدام اللي هيتوزع عليهم {followupGrade === 'all' ? 'الأولاد' : `أولاد ${followupGrade}`} ({unassignedFollowup.length}):
-                                            </p>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {admins.filter(a => !a.isLocked).map(a => {
-                                                    const on = followupAssignServants.includes(a.id);
-                                                    return (
-                                                        <button key={a.id} type="button"
-                                                            onClick={() => setFollowupAssignServants(prev => on ? prev.filter(id => id !== a.id) : [...prev, a.id])}
-                                                            className={`text-xs font-bold py-2 px-2 rounded-lg border ${on ? 'bg-sky-600 border-sky-400 text-white' : 'bg-indigo-900 border-indigo-700 text-indigo-200'}`}>
-                                                            {on ? '✓ ' : ''}{a.name}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                            <div className="flex gap-2">
-                                                <button type="button" onClick={runFollowupAutoAssign} disabled={followupAssignServants.length === 0}
-                                                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2 rounded-lg text-sm">وزّع بالتساوي</button>
-                                                <button type="button" onClick={() => setFollowupAssignPickerOpen(false)}
-                                                    className="px-4 bg-indigo-800 text-indigo-200 font-bold py-2 rounded-lg text-sm">إلغاء</button>
-                                            </div>
-                                            <p className="text-[11px] text-indigo-400">لو الخادم مش موجود في القايمة، ضيفه الأول من "الخدام" عشان يقدر يدخل ويشوف الأولاد اللي عليه.</p>
+                                    {isBoss && (
+                                        <div className="flex gap-1 p-1 bg-indigo-950/60 rounded-xl">
+                                            {tabBtn('mine', 'افتقادي')}
+                                            {tabBtn('report', 'تقرير الخدام')}
+                                            {tabBtn('groups', 'توزيع المجموعات')}
                                         </div>
                                     )}
                                 </div>
 
-                                {followupMeetings.length === 0 ? (
-                                    <p className="text-center text-indigo-300 mt-8">لسه مفيش اجتماعات متسجلة.</p>
-                                ) : scoped.length === 0 ? (
-                                    <p className="text-center text-indigo-300 mt-8">
-                                        {followupScope === 'mine' ? 'مفيش أولاد عليك في الافتقاد دلوقتي 🎉' : 'مفيش أولاد في القايمة دي 🎉'}
-                                    </p>
-                                ) : scoped.map(({ student: s, streak, lastAttendedDate, missedAll }) => {
-                                    const done = isFollowupContacted(s.id);
-                                    const contact = followup.contacts?.[s.id];
-                                    const wa = toWhatsAppNumber(s.phone);
-                                    const firstName = String(s.name || '').split(' ')[0];
-                                    const waText = encodeURIComponent(`أهلاً يا ${firstName} 👋 وحشتنا في الاجتماع! مستنيينك الجمعة الجاية إن شاء الله 🙏`);
-                                    const assignedId = followup.assignments?.[s.id] || '';
-                                    return (
-                                        <div key={s.id} className={`rounded-2xl border p-4 space-y-3 transition-colors ${done ? 'bg-emerald-900/20 border-emerald-600/40' : 'bg-indigo-900/50 border-indigo-700/50'}`}>
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0">
-                                                    <div className="flex items-center gap-2 flex-wrap">
-                                                        <span className="font-bold text-white">{s.name}</span>
-                                                        {s.grade && <span className="bg-sky-500/15 text-sky-300 border border-sky-400/30 font-black text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap">🎓 {s.grade}</span>}
+                                {followupMeetings.length === 0 && <p className="text-center text-indigo-300 mt-8">لسه مفيش اجتماعات متسجلة.</p>}
+
+                                {/* ===== افتقادي ===== */}
+                                {followupMeetings.length > 0 && tab === 'mine' && (
+                                    <div className="space-y-3">
+                                        {myFollowupGroup.length === 0 ? (
+                                            <p className="text-center text-indigo-300 mt-6">{isBoss ? 'إنت مش عليك مجموعة. وزّع المجموعات من "توزيع المجموعات".' : 'لسه ماتوزعتش عليك مجموعة. كلّم مينا رزق.'}</p>
+                                        ) : (
+                                            <>
+                                                <div className="bg-indigo-900/40 border border-indigo-700/50 rounded-2xl p-3.5 space-y-2">
+                                                    <div className="text-sm text-white font-bold">
+                                                        مجموعتك {myFollowupGroup.length} ولد • غاب منهم {myFollowupAbsent.length}
                                                     </div>
-                                                    <div className="text-[11px] text-indigo-300 mt-1">
-                                                        {lastAttendedDate ? `آخر حضور: ${formatCairoDateKeyAr(lastAttendedDate, { day: 'numeric', month: 'long' })}` : 'ماحضرش السنة دي خالص'}
-                                                    </div>
+                                                    {myFollowupAbsent.length > 0 && (
+                                                        <>
+                                                            <div className="flex justify-between text-[11px] text-indigo-300"><span>افتقدت {myFollowupAbsent.length - myPendingFollowupCount} من {myFollowupAbsent.length}</span></div>
+                                                            {bar(myFollowupAbsent.length - myPendingFollowupCount, myFollowupAbsent.length)}
+                                                        </>
+                                                    )}
                                                 </div>
-                                                <span className="shrink-0 bg-red-500/15 text-red-300 border border-red-400/30 text-[11px] font-black px-2.5 py-1 rounded-full whitespace-nowrap">
-                                                    {missedAll ? `غايب كل الـ${streak} اجتماعات` : `غايب آخر ${streak}`}
-                                                </span>
+                                                {myFollowupAbsent.length === 0
+                                                    ? <p className="text-center text-emerald-300 mt-4">كل مجموعتك حضرت آخر اجتماع 🎉</p>
+                                                    : myFollowupAbsent.map(s => renderStudentCard(s))}
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* ===== تقرير الخدام (مينا بس) ===== */}
+                                {followupMeetings.length > 0 && tab === 'report' && isBoss && (
+                                    <div className="space-y-3">
+                                        {unassignedCount > 0 && (
+                                            <button type="button" onClick={() => setFollowupTab('groups')}
+                                                className="w-full text-right bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-xs text-red-200 font-bold">
+                                                ⚠️ فيه {unassignedCount} ولد من غير خادم ({unassignedAbsentCount} منهم غايبين). دوس هنا عشان توزّعهم.
+                                            </button>
+                                        )}
+                                        {followupReport.length === 0 ? (
+                                            <p className="text-center text-indigo-300 mt-6">لسه مفيش مجموعات متوزعة.</p>
+                                        ) : followupReport.map(r => {
+                                            const open = expandedReportServant === r.admin.id;
+                                            const pending = r.absent.filter(s => !isFollowupContacted(s.id));
+                                            return (
+                                                <div key={r.admin.id} className="bg-indigo-900/50 border border-indigo-700/50 rounded-2xl overflow-hidden">
+                                                    <button type="button" onClick={() => setExpandedReportServant(open ? '' : r.admin.id)} className="w-full text-right p-3.5 space-y-2">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="font-black text-white">{r.admin.name}</span>
+                                                            <span className={`text-xs font-black ${r.absent.length === 0 || r.done.length === r.absent.length ? 'text-emerald-300' : r.done.length > 0 ? 'text-amber-300' : 'text-red-300'}`}>
+                                                                {r.absent.length === 0 ? 'كل مجموعته حضرت ✅' : `افتقد ${r.done.length} من ${r.absent.length}`}
+                                                            </span>
+                                                        </div>
+                                                        {r.absent.length > 0 && bar(r.done.length, r.absent.length)}
+                                                        <div className="flex justify-between text-[11px] text-indigo-300">
+                                                            <span>مجموعته {r.group.length} ولد</span>
+                                                            <span>{r.lastActivity ? `آخر استخدام: ${fmtAt(r.lastActivity)}` : 'ماستخدمش الافتقاد لسه'}</span>
+                                                        </div>
+                                                    </button>
+                                                    {open && (
+                                                        <div className="border-t border-indigo-700/50 p-3 space-y-1.5 bg-indigo-950/40">
+                                                            {r.absent.length === 0 && <p className="text-xs text-indigo-300">مفيش غايبين في مجموعته.</p>}
+                                                            {pending.map(s => (
+                                                                <div key={s.id} className="flex items-center justify-between text-xs">
+                                                                    <span className="text-white">⏳ {s.name} <span className="text-indigo-400">({s.grade || ''})</span></span>
+                                                                    <span className="text-red-300">لسه ماتافتقدش</span>
+                                                                </div>
+                                                            ))}
+                                                            {r.done.map(s => (
+                                                                <div key={s.id} className="flex items-center justify-between text-xs">
+                                                                    <span className="text-white">✅ {s.name}</span>
+                                                                    <span className="text-emerald-300">{methodLabel(followup.contacts?.[s.id]?.method)}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+
+                                {/* ===== توزيع المجموعات (مينا بس) ===== */}
+                                {tab === 'groups' && isBoss && (() => {
+                                    const gradeStudents = students.filter(s => String(s.grade || '').trim() === followupGrade).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
+                                    const gradeUnassigned = gradeStudents.filter(s => !assignedServantId(s.id));
+                                    const perServant = admins.map(a => ({ a, n: gradeStudents.filter(s => assignedServantId(s.id) === a.id).length })).filter(x => x.n > 0);
+                                    return (
+                                        <div className="space-y-3">
+                                            <div className="flex gap-2 flex-wrap">
+                                                {followupGrades.map(g => (
+                                                    <button key={g} type="button" onClick={() => { setFollowupGrade(g); setFollowupAssignPickerOpen(false); }}
+                                                        className={`px-3 py-1.5 rounded-full text-xs font-black border ${followupGrade === g ? 'bg-amber-500 text-indigo-950 border-amber-400' : 'bg-indigo-900/60 text-indigo-200 border-indigo-700'}`}>
+                                                        {g} ({students.filter(s => String(s.grade || '').trim() === g).length})
+                                                    </button>
+                                                ))}
                                             </div>
 
-                                            <div className="flex items-center gap-2 text-xs">
-                                                <span className="text-indigo-300 font-bold shrink-0">الخادم:</span>
-                                                {loggedInAdmin.isSuperAdmin ? (
-                                                    <select value={admins.some(a => a.id === assignedId) ? assignedId : ''} onChange={(e) => assignFollowup(s.id, e.target.value)}
-                                                        className="flex-1 bg-indigo-950 text-white border border-indigo-700 rounded-lg px-2 py-1.5 text-xs">
-                                                        <option value="">— من غير خادم —</option>
-                                                        {admins.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                                                    </select>
-                                                ) : (
-                                                    <span className="text-white font-bold">{adminName(assignedId) || '— لسه ماتوزعش —'}</span>
+                                            <div className="bg-indigo-900/50 border border-indigo-700/50 rounded-2xl p-3.5 space-y-2">
+                                                <div className="text-sm font-bold text-white">{followupGrade}: {gradeStudents.length} ولد</div>
+                                                {perServant.length > 0 && (
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {perServant.map(x => <span key={x.a.id} className="bg-sky-500/15 text-sky-200 border border-sky-400/30 text-[11px] font-bold px-2 py-0.5 rounded-full">{x.a.name}: {x.n}</span>)}
+                                                    </div>
+                                                )}
+                                                <div className={`text-xs font-bold ${gradeUnassigned.length ? 'text-red-300' : 'text-emerald-300'}`}>
+                                                    {gradeUnassigned.length ? `${gradeUnassigned.length} ولد من غير خادم` : 'كل الأولاد ليهم خدام ✅'}
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <button type="button" onClick={() => openGroupDistribution(false)} disabled={gradeUnassigned.length === 0}
+                                                        className="bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white text-xs font-bold py-2 rounded-lg">🔀 وزّع اللي من غير خادم</button>
+                                                    <button type="button" onClick={() => openGroupDistribution(true)}
+                                                        className="bg-indigo-700 hover:bg-indigo-600 text-indigo-100 text-xs font-bold py-2 rounded-lg">♻️ إعادة توزيع الصف كله</button>
+                                                </div>
+                                                {followupAssignPickerOpen && (
+                                                    <div className="bg-indigo-950/80 border border-sky-500/40 rounded-xl p-3 space-y-2">
+                                                        <p className="text-sm font-bold text-sky-300">
+                                                            {followupReassignAll ? `إعادة توزيع كل أولاد ${followupGrade} على:` : `توزيع ${gradeUnassigned.length} ولد من ${followupGrade} على:`}
+                                                        </p>
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            {admins.filter(a => !a.isLocked).map(a => {
+                                                                const on = followupAssignServants.includes(a.id);
+                                                                return (
+                                                                    <button key={a.id} type="button" onClick={() => setFollowupAssignServants(prev => on ? prev.filter(id => id !== a.id) : [...prev, a.id])}
+                                                                        className={`text-xs font-bold py-2 px-2 rounded-lg border ${on ? 'bg-sky-600 border-sky-400 text-white' : 'bg-indigo-900 border-indigo-700 text-indigo-200'}`}>
+                                                                        {on ? '✓ ' : ''}{a.name}
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <button type="button" onClick={runGroupDistribution} disabled={followupAssignServants.length === 0}
+                                                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2 rounded-lg text-sm">وزّع بالتساوي</button>
+                                                            <button type="button" onClick={() => setFollowupAssignPickerOpen(false)} className="px-4 bg-indigo-800 text-indigo-200 font-bold py-2 rounded-lg text-sm">إلغاء</button>
+                                                        </div>
+                                                        <p className="text-[11px] text-indigo-400">كل خادم بياخد خليط من اللي بيحضروا واللي بيغيبوا. ولو الخادم مش في القايمة، ضيفه الأول من "الخدام".</p>
+                                                    </div>
                                                 )}
                                             </div>
 
-                                            <div className="grid grid-cols-3 gap-2">
-                                                {wa ? (
-                                                    <a href={`https://wa.me/${wa}?text=${waText}`} target="_blank" rel="noopener noreferrer"
-                                                        className="flex items-center justify-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-2 rounded-lg">
-                                                        <WhatsAppIcon className="w-4 h-4" /> واتساب
-                                                    </a>
-                                                ) : (
-                                                    <span className="flex items-center justify-center bg-indigo-950/60 text-indigo-400 text-[11px] font-bold py-2 rounded-lg">مفيش رقم</span>
-                                                )}
-                                                {wa ? (
-                                                    <a href={`tel:${s.phone}`} className="flex items-center justify-center gap-1 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold py-2 rounded-lg">📞 اتصال</a>
-                                                ) : (
-                                                    <span className="flex items-center justify-center bg-indigo-950/60 text-indigo-400 text-[11px] font-bold py-2 rounded-lg">—</span>
-                                                )}
-                                                <button type="button" onClick={() => toggleFollowupContacted(s.id)}
-                                                    className={`text-xs font-bold py-2 rounded-lg ${done ? 'bg-emerald-600 text-white' : 'bg-indigo-700 hover:bg-indigo-600 text-indigo-100'}`}>
-                                                    {done ? '✅ اتافتقد' : 'اتافتقد؟'}
-                                                </button>
+                                            <div className="bg-indigo-900/40 border border-indigo-700/50 rounded-2xl divide-y divide-indigo-800/60">
+                                                {gradeStudents.map(s => (
+                                                    <div key={s.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                                                        <span className="text-sm text-white truncate">{s.name}</span>
+                                                        <select value={assignedServantId(s.id)} onChange={(e) => assignFollowup(s.id, e.target.value)}
+                                                            className={`shrink-0 max-w-[48%] bg-indigo-950 border rounded-lg px-2 py-1 text-xs ${assignedServantId(s.id) ? 'text-white border-indigo-700' : 'text-red-300 border-red-500/50'}`}>
+                                                            <option value="">— من غير خادم —</option>
+                                                            {admins.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                                                        </select>
+                                                    </div>
+                                                ))}
                                             </div>
-                                            {done && contact && (
-                                                <div className="text-[11px] text-emerald-300">اتافتقد {formatCairoDateKeyAr(contact.date, { weekday: 'long', day: 'numeric', month: 'long' })} بواسطة {contact.by}</div>
-                                            )}
                                         </div>
                                     );
-                                })}
+                                })()}
                             </div>
                         );
                     })()}
