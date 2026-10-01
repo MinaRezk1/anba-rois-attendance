@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction, deleteField } from 'firebase/f
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.10.01.v29';
+const APP_VERSION = '2026.10.01.v31';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -1618,6 +1618,29 @@ const App = () => {
     const [toastMessage, setToastMessage] = useState(null);
     
     const [loggedInAdmin, setLoggedInAdmin] = useState(null);
+    // خادم "افتقاد بس": يشوف مجموعته ويفتقدها، ومايقدرش يضيف نقط ولا يعدّل أو يمسح أي حاجة
+    const isFollowupOnlyAdmin = (a) => Boolean(a && a.role === 'followup');
+    // لو مينا غيّر صلاحية خادم أو عطّل حسابه وهو داخل، التغيير بيسري عليه فورًا
+    useEffect(() => {
+        if (!loggedInAdmin) return;
+        const live = admins.find(a => a.id === loggedInAdmin.id);
+        if (!live) return;
+        if (live.isLocked && !live.isSuperAdmin) {
+            setLoggedInAdmin(null);
+            return;
+        }
+        if ((live.role || '') !== (loggedInAdmin.role || '')) {
+            setLoggedInAdmin(prev => prev ? { ...prev, role: live.role } : prev);
+            if (live.role === 'followup') setActiveView('followup');
+        }
+    }, [admins, loggedInAdmin]);
+    const blockFollowupOnly = () => {
+        if (isFollowupOnlyAdmin(loggedInAdmin)) {
+            showToast('⚠️ حسابك للافتقاد بس.');
+            return true;
+        }
+        return false;
+    };
     const [isAuthModalOpen, setAuthModalOpen] = useState(false);
     const [selectedAdmin, setSelectedAdmin] = useState(null);
     const [pinInput, setPinInput] = useState('');
@@ -1669,6 +1692,8 @@ const App = () => {
     
     const [newAdminName, setNewAdminName] = useState('');
     const [newAdminPin, setNewAdminPin] = useState('');
+    const [newAdminRole, setNewAdminRole] = useState('followup'); // 'followup' = افتقاد بس | 'full' = خادم كامل
+    const [adminSectionOpen, setAdminSectionOpen] = useState(''); // 'add' | 'pin' | 'season'
     const [editingAdminId, setEditingAdminId] = useState(null);
     const [editingAdminPinValue, setEditingAdminPinValue] = useState('');
     const [ownPinCurrent, setOwnPinCurrent] = useState('');
@@ -2055,6 +2080,7 @@ const App = () => {
     // Automatic monthly champion rewards removed in favor of manual servant control
 
     const addStudent = useCallback(() => {
+        if (loggedInAdmin?.role === 'followup') { showToast('⚠️ حسابك للافتقاد بس.'); return; }
         if (!newStudentName.trim()) {
             showToast('الرجاء إدخال الاسم');
             return;
@@ -2091,11 +2117,15 @@ const App = () => {
         setNewStudentGrade('');
         setAddStudentModalOpen(false);
         showToast(`تمت إضافة "${trimmedName}" بنجاح`);
-    }, [newStudentName, newStudentPhone, newStudentGrade, students, showToast]);
+    }, [newStudentName, newStudentPhone, newStudentGrade, students, showToast, loggedInAdmin]);
     
     const addPoints = useCallback((studentId, type, points, fromScan = false, description = null) => {
         if (!loggedInAdmin) {
             showToast('يجب تسجيل الدخول أولاً لإضافة نقاط.');
+            return;
+        }
+        if (loggedInAdmin.role === 'followup') {
+            showToast('⚠️ حسابك للافتقاد بس.');
             return;
         }
         // Use selectedDate only for super-admin historical edits; otherwise use Cairo's current date.
@@ -2265,6 +2295,7 @@ const App = () => {
         }
         if (pinOk) {
             setLoggedInAdmin(adminToLogin);
+            if (adminToLogin.role === 'followup') setActiveView('followup');
             setAuthModalOpen(false);
             showToast(`أهلاً بك, ${adminToLogin.name}`);
             
@@ -2335,6 +2366,7 @@ const App = () => {
 
     const handleSaveStudentEdit = (studentId) => {
         if (!editingStudent) return;
+        if (blockFollowupOnly()) return;
         
         const newName = editingStudent.name.trim();
         const newPhone = editingStudent.phone.trim();
@@ -2398,6 +2430,7 @@ const App = () => {
             return;
         }
         if (!studentToDelete) return;
+        if (blockFollowupOnly()) return;
         const updatedStudents = students.filter(s => s.id !== studentToDelete.id);
         setStudents(updatedStudents);
         showToast(`تم حذف ${studentToDelete.name} بنجاح.`);
@@ -2415,6 +2448,7 @@ const App = () => {
             return;
         }
         if (!pointToDelete) return;
+        if (blockFollowupOnly()) { setPointToDelete(null); return; }
         const { studentId, record } = pointToDelete;
         if (isGiftRecord(record)) {
             // مسح سجل شراء هدية من هنا كان بيرجّع النقط والطلب لسه محجوز (ولو اتلغى بعدين النقط بترجع مرتين)
@@ -2462,13 +2496,25 @@ const App = () => {
             pin: await hashPin(pin),
             isLocked: false,
             failedAttempts: 0,
-            isSuperAdmin: false
+            isSuperAdmin: false,
+            role: newAdminRole === 'full' ? 'full' : 'followup',
         };
 
         setAdmins(prev => [...prev, newAdmin]);
         setNewAdminName('');
         setNewAdminPin('');
-        showToast(`تم إضافة الخادم "${name}" بنجاح.`);
+        setNewAdminRole('followup');
+        setAdminSectionOpen('');
+        showToast(`تم إضافة الخادم "${name}" (${newAdminRole === 'full' ? 'خادم كامل' : 'افتقاد بس'}) بنجاح.`);
+    };
+
+    const handleToggleAdminRole = (adminId) => {
+        setAdmins(prev => prev.map(a => {
+            if (a.id !== adminId || a.isSuperAdmin) return a;
+            const nextRole = a.role === 'followup' ? 'full' : 'followup';
+            showToast(`${a.name}: ${nextRole === 'followup' ? 'بقى افتقاد بس' : 'بقى خادم كامل'}`);
+            return { ...a, role: nextRole };
+        }));
     };
 
     const handleUnlockAdminByFailure = (adminId) => {
@@ -3129,6 +3175,34 @@ const App = () => {
         setFollowupAssignServants(used);
         setFollowupAssignPickerOpen(true);
     };
+    // توزيع افتقاد تانية ثانوي اللي اتعمل في ملفات الـPDF (مينا رزق / ناجي وليم / بولا ماهر)
+    const GRADE2_PDF_PRESET: Record<string, string[]> = {"mina": ["يوسف جورج", "ماريو وائل", "نوفير مايكل", "كيرلس ماجد", "جوسيان جرجس", "جورج شريف", "فيلوباتير عادل", "انطونيوس سامح", "فادي ايهاب", "مينا هاني (بخيت)", "مكاريوس عاطف"], "nagy": ["جميل نبيل", "يوسف امير", "توني ريمون", "ابرام ياسر", "ديفيد سامح", "استيفن منير", "بولا مجدي", "جيوفاني هاني", "ابانوب هاني", "بافلي سمير", "نوفير ماجد"], "bola": ["جيوفاني مايكل", "مينا ميلاد", "جورج وجيه", "جرجس نبيل", "فيلوباتير ماهر", "ديفيد هاني", "فيلوباتير امجد", "جرجس صابر", "كيرلس وجدي", "بيتر عماد"]};
+    const applyGrade2PdfPreset = () => {
+        if (!loggedInAdmin?.isSuperAdmin) return;
+        const norm = (n) => normalizeRosterStudentName(n);
+        const findAdmin = (name) => admins.find(a => norm(a.name) === norm(name));
+        const servantIds = {
+            mina: admins.find(a => a.isSuperAdmin)?.id || '',
+            nagy: findAdmin('ناجي وليم')?.id || '',
+            bola: findAdmin('بولا ماهر')?.id || '',
+        };
+        const missing = [!servantIds.nagy && 'ناجي وليم', !servantIds.bola && 'بولا ماهر'].filter(Boolean);
+        if (missing.length) { showToast(`⚠️ ضيف ${missing.join(' و ')} كخادم الأول من "الخدام" بنفس الاسم.`); return; }
+        const updates: Record<string, string> = {};
+        const notFound: string[] = [];
+        Object.entries(GRADE2_PDF_PRESET).forEach(([key, list]) => {
+            list.forEach(name => {
+                const st = students.find(s => norm(s.name) === norm(name));
+                if (st) updates[st.id] = servantIds[key]; else notFound.push(name);
+            });
+        });
+        const count = Object.keys(updates).length;
+        if (!window.confirm(`هيتطبّق توزيع تانية ثانوي بتاع الـPDF على ${count} ولد:\n• مينا رزق: ${GRADE2_PDF_PRESET.mina.length}\n• ناجي وليم: ${GRADE2_PDF_PRESET.nagy.length}\n• بولا ماهر: ${GRADE2_PDF_PRESET.bola.length}\n\nتكمل؟`)) return;
+        setDoc(FOLLOWUP_DOC_REF(), { assignments: updates }, { merge: true })
+            .then(() => showToast(notFound.length ? `✅ اتوزع ${count} ولد. مالقيتش: ${notFound.join('، ')}` : `✅ اتطبّق توزيع تانية ثانوي على ${count} ولد.`))
+            .catch(err => { console.error(err); showToast('⚠️ فشل التوزيع، جرّب تاني.'); });
+    };
+
     const runGroupDistribution = () => {
         if (!loggedInAdmin?.isSuperAdmin) return;
         const servants = admins.filter(a => followupAssignServants.includes(a.id));
@@ -3242,7 +3316,8 @@ const App = () => {
         return { superAdmin, otherAdmins };
     }, [admins]);
 
-    const isAuthenticated = !!loggedInAdmin;
+    // isAuthenticated = خادم كامل الصلاحيات (خادم الافتقاد بس بيتعامل كأنه زائر في باقي الموقع)
+    const isAuthenticated = !!loggedInAdmin && !isFollowupOnlyAdmin(loggedInAdmin);
     const isSuperAdmin = loggedInAdmin?.isSuperAdmin;
     // صلاحيات "مينا" (المتجر، تعديل نقط السنين اللي فاتت، تنبيهات الأوسمة) للسوبر أدمن بس.
     // (قبل كده كانت بتتحدد من الاسم، فأي خادم اسمه فيه "مينا" زي "مينا معوض" كان بياخدها بالغلط.)
@@ -3412,6 +3487,7 @@ const App = () => {
 
     const handleSavePointsEdit = () => {
         if (!studentForPointsEdit) return;
+        if (blockFollowupOnly()) return;
         
         const ptsVal = parseInt(targetPointsInput, 10);
         if (isNaN(ptsVal) || ptsVal < 0) {
@@ -4800,6 +4876,12 @@ const App = () => {
                                                 <div className={`text-xs font-bold ${gradeUnassigned.length ? 'text-red-300' : 'text-emerald-300'}`}>
                                                     {gradeUnassigned.length ? `${gradeUnassigned.length} ولد من غير خادم` : 'كل الأولاد ليهم خدام ✅'}
                                                 </div>
+                                                {followupGrade === 'تانية ثانوي' && (
+                                                    <button type="button" onClick={applyGrade2PdfPreset}
+                                                        className="w-full bg-amber-500 hover:bg-amber-600 text-indigo-950 text-xs font-black py-2 rounded-lg">
+                                                        📋 طبّق توزيع الـPDF (مينا رزق / ناجي وليم / بولا ماهر)
+                                                    </button>
+                                                )}
                                                 <div className="grid grid-cols-2 gap-2">
                                                     <button type="button" onClick={() => openGroupDistribution(false)} disabled={gradeUnassigned.length === 0}
                                                         className="bg-sky-600 hover:bg-sky-700 disabled:opacity-40 text-white text-xs font-bold py-2 rounded-lg">🔀 وزّع اللي من غير خادم</button>
@@ -5235,112 +5317,151 @@ const App = () => {
             </Modal>
             
             <Modal isOpen={isAdminManagementModalOpen} onClose={() => setAdminManagementModalOpen(false)} title="إدارة الخدام">
-                <div className="bg-indigo-800/50 p-4 rounded-lg mb-6">
-                    <h3 className="text-lg font-semibold mb-3 text-indigo-200">إضافة خادم جديد</h3>
-                    <div className="flex flex-col md:flex-row items-stretch gap-3">
-                        <input
-                            type="text"
-                            value={newAdminName}
-                            onChange={(e) => setNewAdminName(e.target.value)}
-                            placeholder="اسم الخادم..."
-                            className="w-full md:w-auto flex-grow bg-indigo-800 text-white placeholder-indigo-300 border border-indigo-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
-                        <input
-                            type="password"
-                            value={newAdminPin}
-                            onChange={(e) => setNewAdminPin(e.target.value)}
-                            placeholder="الرقم السري"
-                            className="w-full md:w-48 bg-indigo-800 text-white placeholder-indigo-300 border border-indigo-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
-                        <button
-                            onClick={handleAddAdmin}
-                            className="flex-shrink-0 flex items-center justify-center gap-2 bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
-                        >
-                            <UserPlusIcon className="w-5 h-5" />
-                            <span>إضافة</span>
+                {(() => {
+                    const servants = admins.filter(a => !a.isSuperAdmin);
+                    const fullCount = servants.filter(a => a.role !== 'followup' && !a.isLocked).length;
+                    const followupCount = servants.filter(a => a.role === 'followup' && !a.isLocked).length;
+                    const lockedCount = servants.filter(a => a.isLocked).length;
+                    const groupSize = (id) => students.filter(s => followup.assignments?.[s.id] === id).length;
+                    const sectionBtn = (id, icon, label, tone) => (
+                        <button type="button" onClick={() => setAdminSectionOpen(adminSectionOpen === id ? '' : id)}
+                            className={`w-full flex items-center justify-between gap-2 px-4 py-3 rounded-xl font-bold text-sm transition-colors ${tone}`}>
+                            <span>{icon} {label}</span>
+                            <span className="text-xs opacity-70">{adminSectionOpen === id ? '▲' : '▼'}</span>
                         </button>
-                    </div>
-                </div>
-
-                <div className="mt-6 p-3 bg-red-500/10 border border-red-500/30 rounded-lg space-y-2">
-                    <h3 className="text-base font-bold text-red-300">🔄 بداية سنة جديدة</h3>
-                    <p className="text-xs text-red-200/80 leading-relaxed">بتنقل نقط السنة دي لـ"نقاط السنين السابقة" لكل الأولاد، وتصفّر نقط السنة وسجل الحضور. بتحمّل نسخة احتياطية الأول، وبتسألك مرتين.</p>
-                    <button type="button" onClick={handleStartNewSeason} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg transition-colors">
-                        بداية سنة جديدة
-                    </button>
-                </div>
-
-                <div className="mt-6 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg space-y-2">
-                    <h3 className="text-base font-bold text-amber-400">🔑 تغيير رقمي السري</h3>
-                    <input type="password" inputMode="numeric" value={ownPinCurrent} onChange={e => setOwnPinCurrent(e.target.value)} placeholder="رقمك السري الحالي"
-                        className="w-full bg-indigo-700 text-white placeholder-indigo-300 border border-indigo-600 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-500" />
-                    <input type="password" inputMode="numeric" value={ownPinNew} onChange={e => setOwnPinNew(e.target.value)} placeholder="الرقم الجديد (6 أرقام على الأقل)"
-                        className="w-full bg-indigo-700 text-white placeholder-indigo-300 border border-indigo-600 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-500" />
-                    <input type="password" inputMode="numeric" value={ownPinConfirm} onChange={e => setOwnPinConfirm(e.target.value)} placeholder="اكتب الرقم الجديد تاني للتأكيد"
-                        className="w-full bg-indigo-700 text-white placeholder-indigo-300 border border-indigo-600 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-500" />
-                    <button onClick={handleChangeOwnPin} disabled={!ownPinCurrent || !ownPinNew || !ownPinConfirm}
-                        className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-indigo-950 font-bold py-2 rounded-lg transition-colors">
-                        حفظ رقمي الجديد
-                    </button>
-                </div>
-
-                <h3 className="text-lg font-semibold mt-6 mb-3 text-indigo-200">قائمة الخدام الحالية</h3>
-                <div className="space-y-3">
-                    {admins.filter(a => !a.isSuperAdmin).map(admin => (
-                        <div key={admin.id} className="p-3 bg-indigo-800/50 rounded-lg space-y-3">
-                           <div className="flex justify-between items-center">
-                               <div>
-                                   <p className="font-semibold">{admin.name}</p>
-                                   {admin.isLocked ? (
-                                       <span className="text-xs text-red-400 font-semibold">● معطل</span>
-                                   ) : (
-                                       <span className="text-xs text-green-400 font-semibold">● نشط</span>
-                                   )}
-                               </div>
-                               {admin.failedAttempts >= 5 && (
-                                   <button 
-                                       onClick={() => handleUnlockAdminByFailure(admin.id)}
-                                       className="flex items-center gap-1.5 bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-bold py-1 px-2 rounded-lg transition-colors"
-                                   >
-                                       <KeyIcon className="w-3 h-3"/>
-                                       <span>مقفل (5 محاولات)</span>
-                                   </button>
-                               )}
-                           </div>
-                            
-                            {editingAdminId === admin.id ? (
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        type="password"
-                                        value={editingAdminPinValue}
-                                        onChange={e => setEditingAdminPinValue(e.target.value)}
-                                        placeholder="الرقم السري الجديد"
-                                        className="flex-grow bg-indigo-700 text-white placeholder-indigo-300 border border-indigo-600 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                                        autoFocus
-                                    />
-                                    <button onClick={() => handleSaveAdminPin(admin.id)} className="text-green-400 hover:text-green-300 p-1.5 rounded-full bg-indigo-900/50"><CheckIcon className="w-5 h-5"/></button>
-                                    <button onClick={() => setEditingAdminId(null)} className="text-red-400 hover:text-red-300 p-1.5 rounded-full bg-indigo-900/50"><XIcon className="w-5 h-5"/></button>
+                    );
+                    const inputCls = "w-full bg-indigo-950 text-white placeholder-indigo-400 border border-indigo-700 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500";
+                    return (
+                        <div className="space-y-4">
+                            {/* ملخص */}
+                            <div className="grid grid-cols-3 gap-2 text-center">
+                                <div className="bg-sky-500/10 border border-sky-400/30 rounded-xl py-2">
+                                    <div className="text-xl font-black text-sky-300">{fullCount}</div>
+                                    <div className="text-[10px] text-sky-200 font-bold">خادم كامل</div>
                                 </div>
-                            ) : (
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => handleToggleAdminStatus(admin.id)}
-                                        className={`flex-1 text-sm font-bold py-1.5 px-3 rounded-lg transition-colors ${admin.isLocked ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} text-white`}
-                                    >
-                                        {admin.isLocked ? 'تفعيل' : 'تعطيل'}
-                                    </button>
-                                    <button
-                                        onClick={() => handleStartEditPin(admin)}
-                                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold py-1.5 px-3 rounded-lg transition-colors"
-                                    >
-                                        تغيير الرقم السري
+                                <div className="bg-rose-500/10 border border-rose-400/30 rounded-xl py-2">
+                                    <div className="text-xl font-black text-rose-300">{followupCount}</div>
+                                    <div className="text-[10px] text-rose-200 font-bold">افتقاد بس</div>
+                                </div>
+                                <div className="bg-slate-500/10 border border-slate-400/30 rounded-xl py-2">
+                                    <div className="text-xl font-black text-slate-300">{lockedCount}</div>
+                                    <div className="text-[10px] text-slate-300 font-bold">معطّل</div>
+                                </div>
+                            </div>
+
+                            {/* إضافة خادم */}
+                            {sectionBtn('add', '➕', 'إضافة خادم جديد', 'bg-sky-600 hover:bg-sky-700 text-white')}
+                            {adminSectionOpen === 'add' && (
+                                <div className="bg-indigo-900/60 border border-indigo-700/60 rounded-xl p-3 space-y-3">
+                                    <input type="text" value={newAdminName} onChange={(e) => setNewAdminName(e.target.value)} placeholder="اسم الخادم (زي ما هيظهر في الافتقاد)" className={inputCls} />
+                                    <input type="password" inputMode="numeric" value={newAdminPin} onChange={(e) => setNewAdminPin(e.target.value)} placeholder="الرقم السري (6 أرقام على الأقل)" className={inputCls} />
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {[
+                                            { id: 'followup', icon: '📞', title: 'افتقاد بس', desc: 'يشوف مجموعته ويفتقدها. مايضيفش نقط ولا يعدّل حاجة.' },
+                                            { id: 'full', icon: '🛠️', title: 'خادم كامل', desc: 'يسجّل حضور ونقط، ويضيف ويعدّل أولاد، وكمان يفتقد.' },
+                                        ].map(r => (
+                                            <button key={r.id} type="button" onClick={() => setNewAdminRole(r.id)}
+                                                className={`text-right rounded-xl border p-2.5 transition-colors ${newAdminRole === r.id ? 'bg-amber-500/15 border-amber-400' : 'bg-indigo-950/60 border-indigo-700'}`}>
+                                                <div className={`text-sm font-black ${newAdminRole === r.id ? 'text-amber-300' : 'text-white'}`}>{newAdminRole === r.id ? '◉' : '○'} {r.icon} {r.title}</div>
+                                                <div className="text-[10px] text-indigo-300 mt-1 leading-relaxed">{r.desc}</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button onClick={handleAddAdmin} disabled={!newAdminName.trim() || !newAdminPin.trim()}
+                                        className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg transition-colors">
+                                        <UserPlusIcon className="w-5 h-5" />
+                                        <span>إضافة الخادم</span>
                                     </button>
                                 </div>
                             )}
 
+                            {/* قايمة الخدام */}
+                            <div>
+                                <h3 className="text-sm font-black text-indigo-200 mb-2">الخدام ({servants.length})</h3>
+                                {servants.length === 0 ? (
+                                    <p className="text-center text-indigo-300 text-sm py-4">لسه مفيش خدام. ضيف أول خادم من فوق.</p>
+                                ) : (
+                                    <div className="space-y-2.5">
+                                        {servants.map(admin => {
+                                            const isFollowupRole = admin.role === 'followup';
+                                            const size = groupSize(admin.id);
+                                            return (
+                                                <div key={admin.id} className={`rounded-xl border p-3 space-y-2.5 ${admin.isLocked ? 'bg-slate-800/40 border-slate-600/40 opacity-75' : 'bg-indigo-900/50 border-indigo-700/50'}`}>
+                                                    <div className="flex items-center gap-3">
+                                                        <div className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-black text-lg ${isFollowupRole ? 'bg-rose-500/20 text-rose-200' : 'bg-sky-500/20 text-sky-200'}`}>
+                                                            {String(admin.name || '?').trim().charAt(0)}
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="font-bold text-white truncate">{admin.name}</div>
+                                                            <div className="text-[11px] text-indigo-300">
+                                                                {admin.isLocked ? <span className="text-red-300 font-bold">● معطّل</span> : <span className="text-green-300 font-bold">● نشط</span>}
+                                                                {size > 0 && <span> • مجموعته {size} ولد</span>}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* الصلاحية */}
+                                                    <div className="flex p-1 bg-indigo-950/70 rounded-lg text-xs font-bold">
+                                                        <button type="button" onClick={() => { if (!isFollowupRole) handleToggleAdminRole(admin.id); }}
+                                                            className={`flex-1 py-1.5 rounded-md transition-colors ${isFollowupRole ? 'bg-rose-500 text-white' : 'text-indigo-300'}`}>📞 افتقاد بس</button>
+                                                        <button type="button" onClick={() => { if (isFollowupRole) handleToggleAdminRole(admin.id); }}
+                                                            className={`flex-1 py-1.5 rounded-md transition-colors ${!isFollowupRole ? 'bg-sky-600 text-white' : 'text-indigo-300'}`}>🛠️ خادم كامل</button>
+                                                    </div>
+
+                                                    {admin.failedAttempts >= 5 && (
+                                                        <button onClick={() => handleUnlockAdminByFailure(admin.id)}
+                                                            className="w-full flex items-center justify-center gap-1.5 bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-bold py-1.5 rounded-lg">
+                                                            <KeyIcon className="w-3 h-3" /> اتقفل بعد 5 محاولات غلط — دوس لفتحه
+                                                        </button>
+                                                    )}
+
+                                                    {editingAdminId === admin.id ? (
+                                                        <div className="flex items-center gap-2">
+                                                            <input type="password" inputMode="numeric" value={editingAdminPinValue} onChange={e => setEditingAdminPinValue(e.target.value)}
+                                                                placeholder="الرقم السري الجديد (6 أرقام)" className={inputCls} autoFocus />
+                                                            <button onClick={() => handleSaveAdminPin(admin.id)} className="text-green-300 p-2 rounded-lg bg-indigo-950"><CheckIcon className="w-5 h-5" /></button>
+                                                            <button onClick={() => setEditingAdminId(null)} className="text-red-300 p-2 rounded-lg bg-indigo-950"><XIcon className="w-5 h-5" /></button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            <button onClick={() => handleStartEditPin(admin)}
+                                                                className="bg-indigo-700 hover:bg-indigo-600 text-white text-xs font-bold py-2 rounded-lg">🔑 تغيير الرقم السري</button>
+                                                            <button onClick={() => handleToggleAdminStatus(admin.id)}
+                                                                className={`text-xs font-bold py-2 rounded-lg text-white ${admin.isLocked ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600/80 hover:bg-red-700'}`}>
+                                                                {admin.isLocked ? '✅ تفعيل الحساب' : '⛔ تعطيل الحساب'}
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* حسابي */}
+                            {sectionBtn('pin', '🔑', 'تغيير رقمي السري', 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30')}
+                            {adminSectionOpen === 'pin' && (
+                                <div className="bg-indigo-900/60 border border-amber-500/30 rounded-xl p-3 space-y-2">
+                                    <input type="password" inputMode="numeric" value={ownPinCurrent} onChange={e => setOwnPinCurrent(e.target.value)} placeholder="رقمك السري الحالي" className={inputCls} />
+                                    <input type="password" inputMode="numeric" value={ownPinNew} onChange={e => setOwnPinNew(e.target.value)} placeholder="الرقم الجديد (6 أرقام على الأقل)" className={inputCls} />
+                                    <input type="password" inputMode="numeric" value={ownPinConfirm} onChange={e => setOwnPinConfirm(e.target.value)} placeholder="اكتب الرقم الجديد تاني للتأكيد" className={inputCls} />
+                                    <button onClick={handleChangeOwnPin} disabled={!ownPinCurrent || !ownPinNew || !ownPinConfirm}
+                                        className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-indigo-950 font-bold py-2 rounded-lg">حفظ رقمي الجديد</button>
+                                </div>
+                            )}
+
+                            {/* منطقة حساسة */}
+                            {sectionBtn('season', '🔄', 'بداية سنة جديدة', 'bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30')}
+                            {adminSectionOpen === 'season' && (
+                                <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 space-y-2">
+                                    <p className="text-xs text-red-200/90 leading-relaxed">بتنقل نقط السنة دي لـ"نقاط السنين السابقة" لكل الأولاد، وتصفّر نقط السنة وسجل الحضور. بتحمّل نسخة احتياطية الأول، وبتسألك مرتين.</p>
+                                    <button type="button" onClick={handleStartNewSeason} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg">بداية سنة جديدة</button>
+                                </div>
+                            )}
                         </div>
-                    ))}
-                </div>
+                    );
+                })()}
             </Modal>
 
             
@@ -5715,7 +5836,7 @@ const App = () => {
                     ⚠️ بيانات الطلاب وصلت {Math.round(studentsDocBytes / 10485.76)}% من الحد الأقصى. حمّل نسخة احتياطية وكلّم المطوّر قريب عشان نوسّع المساحة.
                 </div>
             )}
-            <div style={{ position: 'fixed', bottom: loggedInAdmin ? 70 : 4, right: 8, fontSize: 10, opacity: 0.45, color: '#c7d2fe', zIndex: 1, pointerEvents: 'none', direction: 'ltr' }}>v{APP_VERSION}</div>
+            <div style={{ position: 'fixed', bottom: loggedInAdmin ? 'calc(1px + env(safe-area-inset-bottom, 0px))' : 4, right: 6, fontSize: 8, opacity: 0.35, color: '#c7d2fe', zIndex: 45, pointerEvents: 'none', direction: 'ltr' }}>v{APP_VERSION}</div>
         </div>
     );
 };
