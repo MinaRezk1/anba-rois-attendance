@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction, deleteField } from 'firebase/f
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.10.01.v32';
+const APP_VERSION = '2026.10.01.v34';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -562,13 +562,13 @@ const Modal = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-70 z-50 flex justify-center items-center p-3 sm:p-4"
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex justify-center items-center p-3 sm:p-4"
       style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 0px))', paddingBottom: 'max(12px, env(safe-area-inset-bottom, 0px))' }}
       onClick={onClose}
     >
       {/* النافذة ليها أقصى طول (قد الشاشة)، والعنوان ثابت فوق، والمحتوى بيتسكرول لو طويل */}
       <div 
-        className="bg-indigo-950 rounded-2xl shadow-xl w-full max-w-md mx-auto text-white border border-indigo-800 flex flex-col max-h-full overflow-hidden"
+        className="glass-modal rounded-3xl shadow-2xl w-full max-w-md mx-auto text-white flex flex-col max-h-full overflow-hidden"
         style={{ maxHeight: 'min(92dvh, 100%)' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -1623,6 +1623,21 @@ const App = () => {
     const [loggedInAdmin, setLoggedInAdmin] = useState(null);
     // خادم "افتقاد بس": يشوف مجموعته ويفتقدها، ومايقدرش يضيف نقط ولا يعدّل أو يمسح أي حاجة
     const isFollowupOnlyAdmin = (a) => Boolean(a && a.role === 'followup');
+    // الأدوار: افتقاد بس ← خادم كامل ← أمين فصل ← مساعد أمين عام ← أمين عام (السوبر أدمن)
+    const ROLE_INFO = {
+        followup: { icon: '📞', title: 'افتقاد بس', desc: 'يفتقد مجموعته ويكتب ملاحظات. مايضيفش نقط ولا يعدّل حاجة.' },
+        full: { icon: '🛠️', title: 'خادم كامل', desc: 'يسجّل حضور ونقط، ويضيف ويعدّل أولاد، ويفتقد.' },
+        class_leader: { icon: '🎓', title: 'أمين فصل', desc: 'خادم كامل + يتابع خدام صفّه وملاحظاتهم ويوزّع مجموعاته.' },
+        assistant: { icon: '⭐', title: 'مساعد أمين عام', desc: 'خادم كامل + يتابع خدام كل الصفوف وملاحظاتهم.' },
+    };
+    const adminRoleKey = (a) => (['followup', 'class_leader', 'assistant'].includes(a?.role) ? a.role : 'full');
+    // نطاق المتابعة: 'all' = كل الصفوف، أو اسم صف، أو '' = مالوش متابعة
+    const oversightScopeOf = (a) => {
+        if (!a) return '';
+        if (a.isSuperAdmin || a.role === 'assistant') return 'all';
+        if (a.role === 'class_leader' && a.leaderGrade) return String(a.leaderGrade).trim();
+        return '';
+    };
     // لو مينا غيّر صلاحية خادم أو عطّل حسابه وهو داخل، التغيير بيسري عليه فورًا
     useEffect(() => {
         if (!loggedInAdmin) return;
@@ -1632,8 +1647,8 @@ const App = () => {
             setLoggedInAdmin(null);
             return;
         }
-        if ((live.role || '') !== (loggedInAdmin.role || '')) {
-            setLoggedInAdmin(prev => prev ? { ...prev, role: live.role } : prev);
+        if ((live.role || '') !== (loggedInAdmin.role || '') || (live.leaderGrade || '') !== (loggedInAdmin.leaderGrade || '')) {
+            setLoggedInAdmin(prev => prev ? { ...prev, role: live.role, leaderGrade: live.leaderGrade } : prev);
             if (live.role === 'followup') setActiveView('followup');
         }
     }, [admins, loggedInAdmin]);
@@ -1659,7 +1674,13 @@ const App = () => {
     const [leaderboardFilter, setLeaderboardFilter] = useState('all'); // 'all', 'current_month', 'prev_month'
     // الافتقاد: مين مسئول عن كل ولد، ومين اتافتقد (متخزن في appData/followup_v1)
     const [followup, setFollowup] = useState<{ assignments: Record<string, string>; contacts: Record<string, any> }>({ assignments: {}, contacts: {} });
-    const [followupTab, setFollowupTab] = useState('mine'); // 'mine' | 'report' | 'groups'
+    const [followupTab, setFollowupTab] = useState('report'); // المتابعة: 'report' | 'notes' | 'groups'
+    const [oversightGrade, setOversightGrade] = useState('all');
+    const [showWholeGroup, setShowWholeGroup] = useState(false);
+    // الملاحظات (متخزنة في appData/notes_v1)
+    const [notesData, setNotesData] = useState<Record<string, Record<string, any>>>({});
+    const [notesStudentId, setNotesStudentId] = useState('');
+    const [noteDraft, setNoteDraft] = useState('');
     const [followupGrade, setFollowupGrade] = useState('أولى ثانوي');
     const [followupAssignPickerOpen, setFollowupAssignPickerOpen] = useState(false);
     const [followupReassignAll, setFollowupReassignAll] = useState(false);
@@ -1695,7 +1716,8 @@ const App = () => {
     
     const [newAdminName, setNewAdminName] = useState('');
     const [newAdminPin, setNewAdminPin] = useState('');
-    const [newAdminRole, setNewAdminRole] = useState('followup'); // 'followup' = افتقاد بس | 'full' = خادم كامل
+    const [newAdminRole, setNewAdminRole] = useState('followup'); // followup | full | class_leader | assistant
+    const [newAdminGrade, setNewAdminGrade] = useState('أولى ثانوي');
     const [adminSectionOpen, setAdminSectionOpen] = useState(''); // 'add' | 'pin' | 'season'
     const [editingAdminId, setEditingAdminId] = useState(null);
     const [editingAdminPinValue, setEditingAdminPinValue] = useState('');
@@ -2500,7 +2522,8 @@ const App = () => {
             isLocked: false,
             failedAttempts: 0,
             isSuperAdmin: false,
-            role: newAdminRole === 'full' ? 'full' : 'followup',
+            role: ROLE_INFO[newAdminRole] ? newAdminRole : 'followup',
+            ...(newAdminRole === 'class_leader' ? { leaderGrade: newAdminGrade } : {}),
         };
 
         setAdmins(prev => [...prev, newAdmin]);
@@ -2508,15 +2531,17 @@ const App = () => {
         setNewAdminPin('');
         setNewAdminRole('followup');
         setAdminSectionOpen('');
-        showToast(`تم إضافة الخادم "${name}" (${newAdminRole === 'full' ? 'خادم كامل' : 'افتقاد بس'}) بنجاح.`);
+        showToast(`تم إضافة الخادم "${name}" (${(ROLE_INFO[newAdminRole] || ROLE_INFO.followup).title}${newAdminRole === 'class_leader' ? ` - ${newAdminGrade}` : ''}) بنجاح.`);
     };
 
-    const handleToggleAdminRole = (adminId) => {
+    const handleSetAdminRole = (adminId, role, grade = '') => {
+        if (!loggedInAdmin?.isSuperAdmin || !ROLE_INFO[role]) return;
         setAdmins(prev => prev.map(a => {
             if (a.id !== adminId || a.isSuperAdmin) return a;
-            const nextRole = a.role === 'followup' ? 'full' : 'followup';
-            showToast(`${a.name}: ${nextRole === 'followup' ? 'بقى افتقاد بس' : 'بقى خادم كامل'}`);
-            return { ...a, role: nextRole };
+            const { leaderGrade, ...rest } = a;
+            const g = role === 'class_leader' ? (grade || leaderGrade || 'أولى ثانوي') : '';
+            showToast(`${a.name}: بقى ${ROLE_INFO[role].title}${g ? ` (${g})` : ''}`);
+            return role === 'class_leader' ? { ...rest, role, leaderGrade: g } : { ...rest, role };
         }));
     };
 
@@ -3142,6 +3167,53 @@ const App = () => {
         }).filter(r => r.group.length > 0)
             .sort((x, y) => (x.absent.length ? x.done.length / x.absent.length : 1) - (y.absent.length ? y.done.length / y.absent.length : 1));
     }, [admins, students, followup, followupInfo, latestMeetingDate]);
+    // ===== المتابعة (أمين الفصل / المساعدين / الأمين العام) =====
+    const myScope = isFollowupOnlyAdmin(loggedInAdmin) ? '' : oversightScopeOf(loggedInAdmin);
+    const canOversee = !!myScope;
+    const scopeCoversGrade = (g) => myScope === 'all' || (!!myScope && String(g || '').trim() === myScope);
+    const scopeCoversStudent = (s) => !!s && scopeCoversGrade(s.grade);
+    // أمين الفصل: التوزيع دايمًا على صفّه
+    useEffect(() => {
+        if (myScope && myScope !== 'all' && followupGrade !== myScope) setFollowupGrade(myScope);
+    }, [myScope, followupGrade]);
+
+    // ===== الملاحظات =====
+    const NOTES_DOC_REF = () => doc(db, 'appData', 'notes_v1');
+    useEffect(() => {
+        const unsub = onSnapshot(NOTES_DOC_REF(), (snap) => {
+            const data: any = snap.exists() ? snap.data() : {};
+            setNotesData((data && typeof data.notes === 'object' && data.notes) || {});
+        }, (err) => console.error('Notes listener error:', err));
+        return () => unsub();
+    }, []);
+    // مين يشوف كل ملاحظات الولد: خادمه + أمين صفّه + المساعدين + الأمين العام. غيرهم يشوف ملاحظاته هو بس.
+    const canSeeAllNotesOf = (s) => !!loggedInAdmin && !!s && (scopeCoversStudent(s) || assignedServantId(s.id) === loggedInAdmin.id);
+    const allNotesOf = (studentId) => Object.entries(notesData[studentId] || {})
+        .map(([id, n]: [string, any]) => ({ id, ...(n || {}) }))
+        .filter((n: any) => n && n.text)
+        .sort((a: any, b: any) => String(b.at || '').localeCompare(String(a.at || '')));
+    const visibleNotesOf = (s) => {
+        if (!s || !loggedInAdmin) return [];
+        const list = allNotesOf(s.id);
+        return canSeeAllNotesOf(s) ? list : list.filter((n: any) => n.byId === loggedInAdmin.id);
+    };
+    const addNote = (studentId, text) => {
+        const clean = String(text || '').trim().slice(0, 1000);
+        if (!loggedInAdmin || !clean) return Promise.resolve(false);
+        const noteId = `n_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        return setDoc(NOTES_DOC_REF(), {
+            notes: { [studentId]: { [noteId]: { text: clean, by: loggedInAdmin.name, byId: loggedInAdmin.id, at: new Date().toISOString(), date: getCairoDateKey() } } },
+        }, { merge: true }).then(() => true).catch(err => { console.error(err); showToast('⚠️ فشل حفظ الملاحظة، جرّب تاني.'); return false; });
+    };
+    const deleteNote = (studentId, note) => {
+        if (!loggedInAdmin || !(loggedInAdmin.isSuperAdmin || note.byId === loggedInAdmin.id)) return;
+        if (!window.confirm('تمسح الملاحظة دي؟')) return;
+        setDoc(NOTES_DOC_REF(), { notes: { [studentId]: { [note.id]: deleteField() } } }, { merge: true })
+            .then(() => showToast('اتمسحت الملاحظة.'))
+            .catch(err => { console.error(err); showToast('⚠️ فشل المسح، جرّب تاني.'); });
+    };
+    const notesDocKB = useMemo(() => Math.round(JSON.stringify(notesData || {}).length / 1024), [notesData]);
+
     const unassignedAbsentCount = students.filter(s => !assignedServantId(s.id) && isAbsentNow(s.id)).length;
     const unassignedCount = students.filter(s => !assignedServantId(s.id)).length;
 
@@ -3163,7 +3235,7 @@ const App = () => {
         }
     };
     const assignFollowup = (studentId, adminId) => {
-        if (!loggedInAdmin?.isSuperAdmin) return;
+        if (!scopeCoversStudent(students.find(s => s.id === studentId))) return;
         setDoc(FOLLOWUP_DOC_REF(), { assignments: { [studentId]: adminId ? adminId : deleteField() } }, { merge: true })
             .catch(err => { console.error(err); showToast('⚠️ فشل حفظ التوزيع، جرّب تاني.'); });
     };
@@ -3171,7 +3243,7 @@ const App = () => {
     // توزيع مجموعات صف كامل على خدام بيختارهم مينا، بالتساوي، وكل خادم بياخد خليط
     // (اللي بيحضروا، واللي بيغيبوا شوية، واللي بيغيبوا كتير)
     const openGroupDistribution = (reassignAll) => {
-        if (!loggedInAdmin?.isSuperAdmin) return;
+        if (!scopeCoversGrade(followupGrade)) return;
         const gradeStudents = students.filter(s => String(s.grade || '').trim() === followupGrade);
         const used = [...new Set(gradeStudents.map(s => assignedServantId(s.id)).filter(Boolean))] as string[];
         setFollowupReassignAll(Boolean(reassignAll));
@@ -3181,7 +3253,7 @@ const App = () => {
     // توزيع افتقاد تانية ثانوي اللي اتعمل في ملفات الـPDF (مينا رزق / ناجي وليم / بولا ماهر)
     const GRADE2_PDF_PRESET: Record<string, string[]> = {"mina": ["يوسف جورج", "ماريو وائل", "نوفير مايكل", "كيرلس ماجد", "جوسيان جرجس", "جورج شريف", "فيلوباتير عادل", "انطونيوس سامح", "فادي ايهاب", "مينا هاني (بخيت)", "مكاريوس عاطف"], "nagy": ["جميل نبيل", "يوسف امير", "توني ريمون", "ابرام ياسر", "ديفيد سامح", "استيفن منير", "بولا مجدي", "جيوفاني هاني", "ابانوب هاني", "بافلي سمير", "نوفير ماجد"], "bola": ["جيوفاني مايكل", "مينا ميلاد", "جورج وجيه", "جرجس نبيل", "فيلوباتير ماهر", "ديفيد هاني", "فيلوباتير امجد", "جرجس صابر", "كيرلس وجدي", "بيتر عماد"]};
     const applyGrade2PdfPreset = () => {
-        if (!loggedInAdmin?.isSuperAdmin) return;
+        if (!scopeCoversGrade('تانية ثانوي')) return;
         const norm = (n) => normalizeRosterStudentName(n);
         const findAdmin = (name) => admins.find(a => norm(a.name) === norm(name));
         const servantIds = {
@@ -3207,7 +3279,7 @@ const App = () => {
     };
 
     const runGroupDistribution = () => {
-        if (!loggedInAdmin?.isSuperAdmin) return;
+        if (!scopeCoversGrade(followupGrade)) return;
         const servants = admins.filter(a => followupAssignServants.includes(a.id));
         if (servants.length === 0) { showToast('اختار خادم واحد على الأقل.'); return; }
         const gradeStudents = students.filter(s => String(s.grade || '').trim() === followupGrade);
@@ -3548,86 +3620,57 @@ const App = () => {
         setStudentForPointsEdit(null);
     };
     
+    // تحديث التطبيق وتنظيف الكاش (بقى في صفحة الإدارة، وللزوار في الهيدر)
+    const forceRefreshApp = async () => {
+        try {
+            if ('caches' in window) {
+                const cacheNames = await caches.keys();
+                await Promise.all(cacheNames.map(name => caches.delete(name)));
+            }
+            if ('serviceWorker' in navigator) {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(registrations.map(registration => registration.unregister()));
+            }
+            localStorage.setItem('church_attendance_app_version', APP_VERSION);
+            window.location.reload();
+        } catch (e) {
+            console.error('Manual cache cleanup failed:', e);
+            window.location.reload();
+        }
+    };
+
+    // الأقسام: الرئيسية (الأولاد/الترتيب/الاجتماعات) — الافتقاد — الإدارة
+    const HOME_VIEWS = ['students', 'leaderboard', 'attendance_summary'];
+    const isFollowupOnlyUser = !!loggedInAdmin && !isAuthenticated;
+    const currentSection = isFollowupOnlyUser ? 'followup'
+        : activeView === 'followup' ? 'followup'
+        : activeView === 'oversight' ? (canOversee ? 'oversight' : 'followup')
+        : (activeView === 'admin' || activeView === 'badge_alerts') ? 'admin'
+        : 'home';
+    const goSection = (view) => { setActiveView(view); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+    const adminAlertsCount = isSuperAdmin ? (pendingBadgesCount + giftsPendingCount) : 0;
+    const todayKey = getCairoDateKey();
+
     return (
-        <div className={`text-slate-100 min-h-screen p-4 md:p-8 ${loggedInAdmin ? 'pb-32 md:pb-32' : ''}`}>
+        <div className={`text-slate-100 min-h-screen p-4 md:p-8 ${isAuthenticated ? 'pb-32 md:pb-32' : ''}`}>
             <div className="max-w-4xl mx-auto">
-                <header className="flex justify-between items-center mb-6 pb-4 border-b border-indigo-800/50">
+                <header className="glass-panel flex justify-between items-center mb-5 px-4 py-3 rounded-2xl sticky top-2 z-30" style={{ top: 'max(8px, env(safe-area-inset-top, 0px))' }}>
                     <div>
-                        <h1 className="text-3xl md:text-4xl font-bold text-amber-400 tracking-wider">Points ثانوي بنين</h1>
-                        <p className="text-lg text-indigo-300 mt-1">اجتماع الأنبا رويس - كنيسة مارمينا</p>
+                        <h1 className="text-2xl md:text-4xl font-black text-white tracking-wide">Points <span className="text-amber-300">ثانوي بنين</span></h1>
+                        <p className="text-sm md:text-lg text-white/60 mt-0.5">اجتماع الأنبا رويس - كنيسة مارمينا</p>
                     </div>
                     <div className="flex items-center gap-2 md:gap-4">
-                        <button
-                            type="button"
-                            onClick={async () => {
-                                try {
-                                    if ('caches' in window) {
-                                        const cacheNames = await caches.keys();
-                                        await Promise.all(cacheNames.map(name => caches.delete(name)));
-                                    }
-                                    if ('serviceWorker' in navigator) {
-                                        const registrations = await navigator.serviceWorker.getRegistrations();
-                                        await Promise.all(registrations.map(registration => registration.unregister()));
-                                    }
-                                    localStorage.setItem('church_attendance_app_version', APP_VERSION);
-                                    window.location.reload();
-                                } catch (e) {
-                                    console.error('Manual cache cleanup failed:', e);
-                                    window.location.reload();
-                                }
-                            }}
-                            className="bg-indigo-800 hover:bg-indigo-700 text-white p-2 rounded-full transition-colors"
-                            title="تحديث التطبيق وتنظيف الكاش"
-                            aria-label="تحديث التطبيق وتنظيف الكاش"
-                        >
-                            🔄
-                        </button>
-                        {isMinaAdmin && (
-                            <button 
-                                onClick={() => setActiveView('badge_alerts')}
-                                className={`relative p-2 rounded-full transition-all flex items-center justify-center ${
-                                    activeView === 'badge_alerts'
-                                        ? 'bg-amber-500 text-indigo-950 shadow-md ring-2 ring-amber-400'
-                                        : pendingBadgesCount > 0
-                                        ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/50'
-                                        : 'bg-indigo-800 hover:bg-indigo-700 text-white'
-                                }`}
-                                title="تنبيهات واستحقاقات الأوسمة والمكافآت (خاص بمينا)"
-                                aria-label="تنبيهات الأوسمة (مينا)"
-                            >
-                                <BellIcon className="w-6 h-6" />
-                                {pendingBadgesCount > 0 && (
-                                    <span className="absolute -top-1.5 -right-1.5 bg-gradient-to-r from-red-500 to-rose-600 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center shadow-lg border-2 border-indigo-950 animate-bounce">
-                                        {pendingBadgesCount}
-                                    </span>
-                                )}
-                            </button>
-                        )}
-                        {isMinaAdmin && (
+                        {!isAuthenticated && (
                             <button
-                                onClick={() => window.dispatchEvent(new CustomEvent('open-gifts-shop'))}
-                                className="relative bg-indigo-800 hover:bg-indigo-700 text-white p-2 rounded-full transition-colors text-xl leading-none"
-                                title="متجر الهدايا"
-                                aria-label="متجر الهدايا"
+                                type="button"
+                                onClick={forceRefreshApp}
+                                className="glass-btn text-white w-10 h-10 rounded-full flex items-center justify-center"
+                                title="تحديث التطبيق"
+                                aria-label="تحديث التطبيق"
                             >
-                                🎁
-                                {giftsPendingCount > 0 && (
-                                    <span className="absolute -top-1.5 -right-1.5 bg-gradient-to-r from-red-500 to-rose-600 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center shadow-lg border-2 border-indigo-950">
-                                        {giftsPendingCount}
-                                    </span>
-                                )}
+                                🔄
                             </button>
                         )}
-                        {isAuthenticated && (
-                            <button 
-                                onClick={() => setBackupModalOpen(true)}
-                                className="bg-indigo-800 hover:bg-indigo-700 text-white p-2 rounded-full transition-colors"
-                                aria-label="النسخ الاحتياطي"
-                            >
-                                <CloudArrowUpIcon className="w-6 h-6" />
-                            </button>
-                        )}
-                        
                         {isAuthenticated ? (
                             <div className="text-left">
                                 <span className="text-amber-400 font-semibold block text-sm md:text-base">مرحباً, {loggedInAdmin.name}</span>
@@ -3679,48 +3722,42 @@ const App = () => {
                     </div>
                 )}
                 
-                {isSuperAdmin && (
-                    <div className="mb-4 bg-indigo-900/50 border border-amber-500/30 p-3 rounded-lg flex items-center justify-between">
-                         <div className="flex items-center gap-2 text-amber-400">
-                             <CalendarIcon className="w-5 h-5" />
-                             <span className="font-bold">تاريخ التسجيل:</span>
-                         </div>
-                         <input 
-                            type="date"
-                            value={selectedDate}
-                            onChange={(e) => setSelectedDate(e.target.value)}
-                            className="bg-indigo-950 border border-indigo-700 rounded px-2 py-1 text-white focus:outline-none focus:border-amber-500"
-                        />
+                {isSuperAdmin && selectedDate !== todayKey && currentSection === 'home' && (
+                    <div className="mb-4 glass-card border !border-amber-400/40 p-3 rounded-2xl flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-amber-300 text-sm font-bold">
+                            <CalendarIcon className="w-5 h-5" />
+                            <span>بتسجّل على يوم {selectedDate}</span>
+                        </div>
+                        <button onClick={() => setSelectedDate(todayKey)} className="text-xs font-black bg-amber-400 text-slate-900 px-3 py-1.5 rounded-full">رجّعه النهارده</button>
                     </div>
                 )}
                 
                 <main>
-                    <div className="mb-6 bg-indigo-900/70 p-1.5 rounded-xl flex items-center gap-2 border border-indigo-800/50 overflow-x-auto">
-                        <button onClick={() => setActiveView('students')} className={`flex-1 min-w-[120px] text-center rounded-lg py-2 font-bold flex items-center justify-center gap-2 transition-colors ${activeView === 'students' ? 'bg-indigo-700 text-amber-400' : 'text-indigo-300 hover:bg-indigo-800/50'}`}>
-                            <UserGroupIcon className="w-5 h-5" />
-                            <span className="whitespace-nowrap">شباب الأنبا رويس ({students.length})</span>
-                        </button>
-                         <button onClick={() => setActiveView('leaderboard')} className={`flex-1 min-w-[120px] text-center rounded-lg py-2 font-bold flex items-center justify-center gap-2 transition-colors ${activeView === 'leaderboard' ? 'bg-indigo-700 text-amber-400' : 'text-indigo-300 hover:bg-indigo-800/50'}`}>
-                             <TrophyIcon className="w-5 h-5" />
-                             <span className="whitespace-nowrap">Leaders Board</span>
-                         </button>
-                         <button onClick={() => setActiveView('attendance_summary')} className={`flex-1 min-w-[120px] text-center rounded-lg py-2 font-bold flex items-center justify-center gap-2 transition-colors ${activeView === 'attendance_summary' ? 'bg-indigo-700 text-amber-400' : 'text-indigo-300 hover:bg-indigo-800/50'}`}>
-                            <CalendarIcon className="w-5 h-5" />
-                            <span className="whitespace-nowrap">سجل الاجتماعات</span>
-                        </button>
-                        {loggedInAdmin && (
-                            <button onClick={() => setActiveView('followup')} className={`flex-1 min-w-[120px] text-center rounded-lg py-2 font-bold flex items-center justify-center gap-2 transition-colors ${activeView === 'followup' ? 'bg-indigo-700 text-amber-400' : 'text-indigo-300 hover:bg-indigo-800/50'}`}>
-                                <span>📞</span>
-                                <span className="whitespace-nowrap">افتقاد</span>
-                                {myPendingFollowupCount > 0 && (
-                                    <span className="bg-red-600 text-white text-[10px] font-black rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center">{myPendingFollowupCount}</span>
-                                )}
-                            </button>
-                        )}
-                    </div>
+                    {currentSection === 'home' && (
+                        <div className="mb-5 glass-panel p-1 rounded-2xl grid grid-cols-3 gap-1">
+                            {[
+                                { v: 'students', label: `الأولاد (${students.length})`, icon: <UserGroupIcon className="w-5 h-5" /> },
+                                { v: 'leaderboard', label: 'الترتيب', icon: <TrophyIcon className="w-5 h-5" /> },
+                                { v: 'attendance_summary', label: 'الاجتماعات', icon: <CalendarIcon className="w-5 h-5" /> },
+                            ].map(t => (
+                                <button key={t.v} onClick={() => setActiveView(t.v)}
+                                    className={`rounded-xl py-2 px-1 text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${activeView === t.v ? 'seg-active text-white' : 'text-white/60 hover:text-white'}`}>
+                                    {t.icon}
+                                    <span className="whitespace-nowrap">{t.label}</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
 
-                    {activeView === 'students' && (
+                    {!isFollowupOnlyUser && activeView === 'students' && (
                         <div>
+                            {isAuthenticated && (
+                                <button onClick={() => setAddStudentModalOpen(true)}
+                                    className="w-full mb-3 glass-card rounded-2xl py-3 flex items-center justify-center gap-2 text-emerald-300 font-black active:scale-[0.98] transition">
+                                    <UserPlusIcon className="w-5 h-5" />
+                                    <span>إضافة ولد جديد</span>
+                                </button>
+                            )}
                             <div className="mb-6 relative">
                                 <input
                                     type="text"
@@ -3798,6 +3835,16 @@ const App = () => {
 
                                         {expandedStudentId === student.id && (
                                             <div className="p-4 border-t border-indigo-800/50 bg-indigo-900/50">
+                                                {isAuthenticated && (() => {
+                                                    const list = visibleNotesOf(student);
+                                                    return (
+                                                        <button type="button" onClick={() => { setNotesStudentId(student.id); setNoteDraft(''); }}
+                                                            className="w-full mb-4 flex items-center justify-between gap-2 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 text-right">
+                                                            <span className="min-w-0 truncate text-sm text-white/85">{list[0] ? `📝 ${list[0].text}` : '📝 مفيش ملاحظات على الولد ده'}</span>
+                                                            <span className="shrink-0 text-xs font-black text-amber-300">{list.length > 0 ? `الملاحظات (${list.length})` : '+ ملاحظة'}</span>
+                                                        </button>
+                                                    );
+                                                })()}
                                                 <div className="flex justify-between items-start mb-4">
                                                     <div className="space-y-2 w-full">
                                                         {/* Name Edit (Super Admin Only) */}
@@ -4048,7 +4095,7 @@ const App = () => {
                             </div>
                         </div>
                     )}
-                    {activeView === 'leaderboard' && (
+                    {!isFollowupOnlyUser && activeView === 'leaderboard' && (
                          <div className="space-y-4 animate-fade-in-out">
                              {/* Admin Manual Rewards Bar */}
                              {isAuthenticated && (
@@ -4693,16 +4740,33 @@ const App = () => {
                     )}
                     
 
-                    {activeView === 'followup' && loggedInAdmin && (() => {
-                        const isBoss = Boolean(loggedInAdmin.isSuperAdmin);
-                        const tab = isBoss ? followupTab : 'mine';
+                    {(activeView === 'followup' || activeView === 'oversight' || isFollowupOnlyUser) && loggedInAdmin && (() => {
+                        const mode = (activeView === 'oversight' && canOversee && !isFollowupOnlyUser) ? 'oversight' : 'mine';
+                        const tab = mode === 'mine' ? 'mine' : (['report', 'notes', 'groups'].includes(followupTab) ? followupTab : 'report');
+                        const reportGrade = myScope === 'all' ? oversightGrade : myScope;
+                        const inReportGrade = (s) => reportGrade === 'all' || String(s.grade || '').trim() === reportGrade;
+                        const noteLine = (n) => n ? `${n.by} • ${fmtShortAt(n.at)}` : '';
                         const fmt = (d, opts: any = { day: 'numeric', month: 'long' }) => d ? formatCairoDateKeyAr(d, opts) : '';
+                        function fmtShortAt(iso) {
+                            if (!iso) return '';
+                            const d = new Date(iso);
+                            return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ar-EG', { timeZone: 'Africa/Cairo', day: 'numeric', month: 'short' });
+                        }
                         const fmtAt = (iso) => {
                             if (!iso) return '';
                             const d = new Date(iso);
                             return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ar-EG', { timeZone: 'Africa/Cairo', weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' });
                         };
                         const methodLabel = (m) => m === 'whatsapp' ? 'واتساب' : m === 'call' ? 'مكالمة' : 'يدوي';
+                        const notesBtn = (s, compact = false) => {
+                            const n = visibleNotesOf(s).length;
+                            return (
+                                <button type="button" onClick={() => { setNotesStudentId(s.id); setNoteDraft(''); }}
+                                    className={`shrink-0 font-bold rounded-lg border border-white/15 bg-white/10 text-white/85 ${compact ? 'text-[11px] px-2 py-1' : 'text-xs px-3 py-2'}`}>
+                                    📝 {n > 0 ? `ملاحظات (${n})` : 'ملاحظة'}
+                                </button>
+                            );
+                        };
                         const tabBtn = (id, label) => (
                             <button type="button" onClick={() => setFollowupTab(id)}
                                 className={`flex-1 py-2 rounded-lg text-sm font-black transition-colors ${tab === id ? 'bg-amber-500 text-indigo-950' : 'text-indigo-200 hover:bg-indigo-800/60'}`}>{label}</button>
@@ -4753,6 +4817,17 @@ const App = () => {
                                     {done && contact && (
                                         <div className="text-[11px] text-emerald-300">اتافتقد ({methodLabel(contact.method)}) {fmt(contact.date, { weekday: 'long', day: 'numeric', month: 'long' })} بواسطة {contact.by}</div>
                                     )}
+                                    {(() => {
+                                        const last = visibleNotesOf(s)[0];
+                                        return (
+                                            <div className="flex items-center gap-2">
+                                                <div className="flex-1 min-w-0 text-[11px] text-white/60 truncate">
+                                                    {last ? <>📝 {last.text} <span className="text-white/40">— {noteLine(last)}</span></> : 'مفيش ملاحظات'}
+                                                </div>
+                                                {notesBtn(s, true)}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             );
                         };
@@ -4761,25 +4836,35 @@ const App = () => {
                             <div className="space-y-4 animate-fade-in-out">
                                 <div className="bg-indigo-900/60 border border-indigo-700/60 rounded-2xl p-4 space-y-2">
                                     <div className="flex items-center justify-between gap-3 flex-wrap">
-                                        <h2 className="text-lg font-black text-amber-400">📞 افتقاد</h2>
+                                        <h2 className="text-lg font-black text-amber-400">{mode === 'oversight' ? `📊 المتابعة${myScope !== 'all' ? ` - ${myScope}` : ''}` : '📞 افتقادي'}</h2>
                                         {latestMeetingDate && <span className="text-[11px] text-indigo-300">آخر اجتماع: {fmt(latestMeetingDate, { weekday: 'long', day: 'numeric', month: 'long' })}</span>}
                                     </div>
-                                    {isBoss && (
+                                    {mode === 'oversight' && (
                                         <div className="flex gap-1 p-1 bg-indigo-950/60 rounded-xl">
-                                            {tabBtn('mine', 'افتقادي')}
                                             {tabBtn('report', 'تقرير الخدام')}
-                                            {tabBtn('groups', 'توزيع المجموعات')}
+                                            {tabBtn('notes', 'الملاحظات')}
+                                            {tabBtn('groups', 'المجموعات')}
+                                        </div>
+                                    )}
+                                    {mode === 'oversight' && tab !== 'groups' && myScope === 'all' && (
+                                        <div className="flex gap-1.5 flex-wrap">
+                                            {['all', ...followupGrades].map(g => (
+                                                <button key={g} type="button" onClick={() => setOversightGrade(g)}
+                                                    className={`px-3 py-1 rounded-full text-[11px] font-black border ${oversightGrade === g ? 'bg-amber-500 text-indigo-950 border-amber-400' : 'bg-white/5 text-white/70 border-white/15'}`}>
+                                                    {g === 'all' ? 'كل الصفوف' : g}
+                                                </button>
+                                            ))}
                                         </div>
                                     )}
                                 </div>
 
-                                {followupMeetings.length === 0 && <p className="text-center text-indigo-300 mt-8">لسه مفيش اجتماعات متسجلة.</p>}
+                                {followupMeetings.length === 0 && tab !== 'groups' && tab !== 'notes' && <p className="text-center text-indigo-300 mt-8">لسه مفيش اجتماعات متسجلة.</p>}
 
                                 {/* ===== افتقادي ===== */}
                                 {followupMeetings.length > 0 && tab === 'mine' && (
                                     <div className="space-y-3">
                                         {myFollowupGroup.length === 0 ? (
-                                            <p className="text-center text-indigo-300 mt-6">{isBoss ? 'إنت مش عليك مجموعة. وزّع المجموعات من "توزيع المجموعات".' : 'لسه ماتوزعتش عليك مجموعة. كلّم مينا رزق.'}</p>
+                                            <p className="text-center text-indigo-300 mt-6">{canOversee ? 'إنت مش عليك مجموعة. المجموعات بتتوزع من 📊 المتابعة ← المجموعات.' : 'لسه ماتوزعتش عليك مجموعة. كلّم أمين الفصل أو مينا رزق.'}</p>
                                         ) : (
                                             <>
                                                 <div className="bg-indigo-900/40 border border-indigo-700/50 rounded-2xl p-3.5 space-y-2">
@@ -4796,23 +4881,49 @@ const App = () => {
                                                 {myFollowupAbsent.length === 0
                                                     ? <p className="text-center text-emerald-300 mt-4">كل مجموعتك حضرت آخر اجتماع 🎉</p>
                                                     : myFollowupAbsent.map(s => renderStudentCard(s))}
+                                                {myFollowupGroup.length > myFollowupAbsent.length && (
+                                                    <div className="bg-indigo-900/40 border border-indigo-700/50 rounded-2xl overflow-hidden">
+                                                        <button type="button" onClick={() => setShowWholeGroup(v => !v)} className="w-full flex justify-between items-center px-3.5 py-3 text-sm font-bold text-white">
+                                                            <span>✅ اللي حضروا من مجموعتك ({myFollowupGroup.length - myFollowupAbsent.length})</span>
+                                                            <span className="text-xs text-white/50">{showWholeGroup ? '▲' : '▼'}</span>
+                                                        </button>
+                                                        {showWholeGroup && (
+                                                            <div className="border-t border-indigo-700/50 divide-y divide-indigo-800/60">
+                                                                {myFollowupGroup.filter(s => !isAbsentNow(s.id)).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar')).map(s => (
+                                                                    <div key={s.id} className="flex items-center justify-between gap-2 px-3.5 py-2">
+                                                                        <span className="text-sm text-white truncate">{s.name}</span>
+                                                                        {notesBtn(s, true)}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </>
                                         )}
                                     </div>
                                 )}
 
-                                {/* ===== تقرير الخدام (مينا بس) ===== */}
-                                {followupMeetings.length > 0 && tab === 'report' && isBoss && (
+                                {/* ===== تقرير الخدام (المتابعة) ===== */}
+                                {followupMeetings.length > 0 && tab === 'report' && mode === 'oversight' && (() => {
+                                    const scoped = followupReport
+                                        .map(r => ({ ...r, group: r.group.filter(inReportGrade), absent: r.absent.filter(inReportGrade), done: r.done.filter(inReportGrade) }))
+                                        .filter(r => r.group.length > 0);
+                                    const unCount = students.filter(s => inReportGrade(s) && !assignedServantId(s.id)).length;
+                                    const unAbsent = students.filter(s => inReportGrade(s) && !assignedServantId(s.id) && isAbsentNow(s.id)).length;
+                                    const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+                                    const notesCountBy = (adminId) => students.filter(inReportGrade).reduce((n, s) => n + allNotesOf(s.id).filter((x: any) => x.byId === adminId && String(x.at || '') >= monthAgo).length, 0);
+                                    return (
                                     <div className="space-y-3">
-                                        {unassignedCount > 0 && (
+                                        {unCount > 0 && (
                                             <button type="button" onClick={() => setFollowupTab('groups')}
                                                 className="w-full text-right bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-xs text-red-200 font-bold">
-                                                ⚠️ فيه {unassignedCount} ولد من غير خادم ({unassignedAbsentCount} منهم غايبين). دوس هنا عشان توزّعهم.
+                                                ⚠️ فيه {unCount} ولد من غير خادم ({unAbsent} منهم غايبين). دوس هنا عشان توزّعهم.
                                             </button>
                                         )}
-                                        {followupReport.length === 0 ? (
+                                        {scoped.length === 0 ? (
                                             <p className="text-center text-indigo-300 mt-6">لسه مفيش مجموعات متوزعة.</p>
-                                        ) : followupReport.map(r => {
+                                        ) : scoped.map(r => {
                                             const open = expandedReportServant === r.admin.id;
                                             const pending = r.absent.filter(s => !isFollowupContacted(s.id));
                                             return (
@@ -4825,43 +4936,74 @@ const App = () => {
                                                             </span>
                                                         </div>
                                                         {r.absent.length > 0 && bar(r.done.length, r.absent.length)}
-                                                        <div className="flex justify-between text-[11px] text-indigo-300">
-                                                            <span>مجموعته {r.group.length} ولد</span>
-                                                            <span>{r.lastActivity ? `آخر استخدام: ${fmtAt(r.lastActivity)}` : 'ماستخدمش الافتقاد لسه'}</span>
+                                                        <div className="flex justify-between gap-2 text-[11px] text-indigo-300">
+                                                            <span>مجموعته {r.group.length} ولد • 📝 {notesCountBy(r.admin.id)} ملاحظة آخر شهر</span>
+                                                            <span className="text-left">{r.lastActivity ? `آخر استخدام: ${fmtAt(r.lastActivity)}` : 'ماستخدمش الافتقاد لسه'}</span>
                                                         </div>
                                                     </button>
                                                     {open && (
                                                         <div className="border-t border-indigo-700/50 p-3 space-y-1.5 bg-indigo-950/40">
                                                             {r.absent.length === 0 && <p className="text-xs text-indigo-300">مفيش غايبين في مجموعته.</p>}
-                                                            {pending.map(s => (
-                                                                <div key={s.id} className="flex items-center justify-between text-xs">
-                                                                    <span className="text-white">⏳ {s.name} <span className="text-indigo-400">({s.grade || ''})</span></span>
-                                                                    <span className="text-red-300">لسه ماتافتقدش</span>
-                                                                </div>
-                                                            ))}
-                                                            {r.done.map(s => (
-                                                                <div key={s.id} className="flex items-center justify-between text-xs">
-                                                                    <span className="text-white">✅ {s.name}</span>
-                                                                    <span className="text-emerald-300">{methodLabel(followup.contacts?.[s.id]?.method)}</span>
-                                                                </div>
-                                                            ))}
+                                                            {[...pending, ...r.done].map(s => {
+                                                                const isDone = isFollowupContacted(s.id);
+                                                                const last = allNotesOf(s.id)[0];
+                                                                return (
+                                                                    <div key={s.id} className="py-1.5 space-y-1">
+                                                                        <div className="flex items-center justify-between gap-2 text-xs">
+                                                                            <span className="text-white truncate">{isDone ? '✅' : '⏳'} {s.name} <span className="text-indigo-400">({s.grade || ''})</span></span>
+                                                                            <span className={`shrink-0 ${isDone ? 'text-emerald-300' : 'text-red-300'}`}>{isDone ? methodLabel(followup.contacts?.[s.id]?.method) : 'لسه ماتافتقدش'}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="flex-1 min-w-0 text-[11px] text-white/55 truncate">{last ? <>📝 {last.text} <span className="text-white/35">— {noteLine(last)}</span></> : 'مفيش ملاحظات'}</div>
+                                                                            {notesBtn(s, true)}
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
                                                         </div>
                                                     )}
                                                 </div>
                                             );
                                         })}
                                     </div>
-                                )}
+                                    );
+                                })()}
 
-                                {/* ===== توزيع المجموعات (مينا بس) ===== */}
-                                {tab === 'groups' && isBoss && (() => {
+                                {/* ===== كل الملاحظات (المتابعة) ===== */}
+                                {tab === 'notes' && mode === 'oversight' && (() => {
+                                    const feed = students.filter(inReportGrade)
+                                        .flatMap(s => allNotesOf(s.id).map((n: any) => ({ ...n, student: s })))
+                                        .sort((a: any, b: any) => String(b.at || '').localeCompare(String(a.at || '')))
+                                        .slice(0, 80);
+                                    return (
+                                        <div className="space-y-2.5">
+                                            {feed.length === 0 ? (
+                                                <p className="text-center text-indigo-300 mt-6">لسه مفيش ملاحظات اتكتبت.</p>
+                                            ) : feed.map((n: any) => (
+                                                <button key={`${n.student.id}_${n.id}`} type="button" onClick={() => { setNotesStudentId(n.student.id); setNoteDraft(''); }}
+                                                    className="w-full text-right bg-indigo-900/50 border border-indigo-700/50 rounded-2xl p-3 space-y-1">
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="font-bold text-white text-sm truncate">{n.student.name} <span className="text-[11px] text-indigo-300 font-normal">({n.student.grade || ''})</span></span>
+                                                        <span className="shrink-0 text-[11px] text-white/45">{fmtShortAt(n.at)}</span>
+                                                    </div>
+                                                    <div className="text-sm text-white/85 whitespace-pre-wrap break-words">{n.text}</div>
+                                                    <div className="text-[11px] text-sky-300">✍️ {n.by}</div>
+                                                </button>
+                                            ))}
+                                            {feed.length === 80 && <p className="text-center text-[11px] text-white/40">بيظهر آخر 80 ملاحظة بس. دوس على أي ولد تشوف كل ملاحظاته.</p>}
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* ===== توزيع المجموعات (المتابعة) ===== */}
+                                {tab === 'groups' && mode === 'oversight' && (() => {
                                     const gradeStudents = students.filter(s => String(s.grade || '').trim() === followupGrade).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
                                     const gradeUnassigned = gradeStudents.filter(s => !assignedServantId(s.id));
                                     const perServant = admins.map(a => ({ a, n: gradeStudents.filter(s => assignedServantId(s.id) === a.id).length })).filter(x => x.n > 0);
                                     return (
                                         <div className="space-y-3">
                                             <div className="flex gap-2 flex-wrap">
-                                                {followupGrades.map(g => (
+                                                {followupGrades.filter(scopeCoversGrade).map(g => (
                                                     <button key={g} type="button" onClick={() => { setFollowupGrade(g); setFollowupAssignPickerOpen(false); }}
                                                         className={`px-3 py-1.5 rounded-full text-xs font-black border ${followupGrade === g ? 'bg-amber-500 text-indigo-950 border-amber-400' : 'bg-indigo-900/60 text-indigo-200 border-indigo-700'}`}>
                                                         {g} ({students.filter(s => String(s.grade || '').trim() === g).length})
@@ -4936,7 +5078,7 @@ const App = () => {
                         );
                     })()}
 
-                    {activeView === 'attendance_summary' && (
+                    {!isFollowupOnlyUser && activeView === 'attendance_summary' && (
                         <div className="space-y-4 animate-fade-in-out">
                             {isAuthenticated && meetingsStats.length > 0 && (
                                 <button
@@ -5048,41 +5190,142 @@ const App = () => {
                         </div>
                     )}
 
+                    {activeView === 'admin' && isAuthenticated && (
+                        <div className="space-y-4">
+                            <h2 className="text-xl font-black text-white">⚙️ الإدارة</h2>
+                            <div className="grid grid-cols-2 gap-3">
+                                {isSuperAdmin && (
+                                    <button onClick={() => setAdminManagementModalOpen(true)} className="admin-tile">
+                                        <span className="text-3xl">👥</span>
+                                        <span className="font-black text-white">الخدام</span>
+                                        <span className="text-[11px] text-white/55">إضافة وصلاحيات وأرقام سرية</span>
+                                    </button>
+                                )}
+                                {isSuperAdmin && (
+                                    <button onClick={() => window.dispatchEvent(new CustomEvent('open-gifts-shop'))} className="admin-tile relative">
+                                        <span className="text-3xl">🎁</span>
+                                        <span className="font-black text-white">متجر الهدايا</span>
+                                        <span className="text-[11px] text-white/55">الهدايا والطلبات</span>
+                                        {giftsPendingCount > 0 && <span className="tile-badge">{giftsPendingCount}</span>}
+                                    </button>
+                                )}
+                                {isSuperAdmin && (
+                                    <button onClick={() => goSection('badge_alerts')} className="admin-tile relative">
+                                        <span className="text-3xl">🔔</span>
+                                        <span className="font-black text-white">الأوسمة والمكافآت</span>
+                                        <span className="text-[11px] text-white/55">المستحقين وأوائل الشهر</span>
+                                        {pendingBadgesCount > 0 && <span className="tile-badge">{pendingBadgesCount}</span>}
+                                    </button>
+                                )}
+                                <button onClick={() => setBackupModalOpen(true)} className="admin-tile">
+                                    <CloudArrowUpIcon className="w-8 h-8 text-sky-300" />
+                                    <span className="font-black text-white">النسخ الاحتياطي</span>
+                                    <span className="text-[11px] text-white/55">تحميل واستعادة البيانات</span>
+                                </button>
+                                <button onClick={forceRefreshApp} className="admin-tile">
+                                    <span className="text-3xl">🔄</span>
+                                    <span className="font-black text-white">تحديث التطبيق</span>
+                                    <span className="text-[11px] text-white/55">لو حاسس إن فيه حاجة قديمة</span>
+                                </button>
+                            </div>
+                            {isSuperAdmin && (
+                                <div className="glass-card rounded-2xl p-4 flex items-center justify-between gap-3">
+                                    <div>
+                                        <div className="font-black text-white flex items-center gap-2"><CalendarIcon className="w-5 h-5 text-amber-300" /> تاريخ التسجيل</div>
+                                        <div className="text-[11px] text-white/55 mt-0.5">غيّره بس لو هتسجّل نقط ليوم فات</div>
+                                    </div>
+                                    <input
+                                        type="date"
+                                        value={selectedDate}
+                                        onChange={(e) => setSelectedDate(e.target.value || todayKey)}
+                                        className="glass-input rounded-xl px-2 py-1.5 text-white focus:outline-none"
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                 </main>
             </div>
 
             {isAuthenticated && (
-                // شريط تحت الشاشة بدل الدواير العايمة اللي كانت بتغطي على زراير النقط
-                <div className="fixed bottom-0 inset-x-0 z-40 bg-indigo-950/95 backdrop-blur border-t border-indigo-700/60 shadow-[0_-8px_24px_rgba(0,0,0,0.35)]" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-                    <div className="max-w-3xl mx-auto grid gap-1 px-2 py-1.5" style={{ gridTemplateColumns: `repeat(${isSuperAdmin ? 4 : 3}, minmax(0, 1fr))` }}>
-                        <button onClick={() => setScannerOpen(true)} aria-label="فتح الكاميرا للمسح"
-                            className="flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-xl text-amber-400 hover:bg-indigo-800/60 active:scale-95 transition">
-                            <CameraIcon className="w-6 h-6" />
-                            <span className="text-[11px] font-bold">مسح</span>
-                        </button>
-                        <button onClick={() => setAddStudentModalOpen(true)} aria-label="إضافة شاب جديد"
-                            className="flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-xl text-green-400 hover:bg-indigo-800/60 active:scale-95 transition">
-                            <UserPlusIcon className="w-6 h-6" />
-                            <span className="text-[11px] font-bold">ولد جديد</span>
-                        </button>
-                        <button onClick={() => { setActiveView('followup'); window.scrollTo({ top: 0, behavior: 'smooth' }); }} aria-label="الافتقاد"
-                            className={`relative flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-xl hover:bg-indigo-800/60 active:scale-95 transition ${activeView === 'followup' ? 'text-amber-300' : 'text-rose-300'}`}>
-                            <span className="text-xl leading-6">📞</span>
-                            <span className="text-[11px] font-bold">افتقاد</span>
-                            {myPendingFollowupCount > 0 && (
-                                <span className="absolute top-0.5 right-1/4 bg-red-600 text-white text-[9px] font-black rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center">{myPendingFollowupCount}</span>
-                            )}
-                        </button>
-                        {isSuperAdmin && (
-                            <button onClick={() => setAdminManagementModalOpen(true)} aria-label="إدارة الخدام"
-                                className="flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-xl text-sky-400 hover:bg-indigo-800/60 active:scale-95 transition">
-                                <ShieldCheckIcon className="w-6 h-6" />
-                                <span className="text-[11px] font-bold">الخدام</span>
-                            </button>
-                        )}
+                // الشريط اللي تحت: الأقسام الأساسية
+                <nav className="fixed bottom-0 inset-x-0 z-40 px-3" style={{ paddingBottom: 'max(10px, env(safe-area-inset-bottom, 0px))' }}>
+                    <div className="glass-bar max-w-md mx-auto rounded-[26px] grid gap-1 px-2 py-1.5" style={{ gridTemplateColumns: `repeat(${canOversee ? 5 : 4}, minmax(0, 1fr))` }}>
+                        {[
+                            { key: 'home', label: 'الرئيسية', onClick: () => goSection(HOME_VIEWS.includes(activeView) ? activeView : 'students'), icon: <UserGroupIcon className="w-6 h-6" /> },
+                            { key: 'scan', label: 'مسح', onClick: () => setScannerOpen(true), icon: <CameraIcon className="w-6 h-6" /> },
+                            { key: 'followup', label: 'الافتقاد', onClick: () => goSection('followup'), icon: <span className="text-xl leading-6">📞</span>, badge: myPendingFollowupCount },
+                            ...(canOversee ? [{ key: 'oversight', label: 'المتابعة', onClick: () => goSection('oversight'), icon: <span className="text-xl leading-6">📊</span>, badge: 0 }] : []),
+                            { key: 'admin', label: 'الإدارة', onClick: () => goSection('admin'), icon: <span className="text-xl leading-6">⚙️</span>, badge: adminAlertsCount },
+                        ].map(item => {
+                            const active = item.key === currentSection;
+                            return (
+                                <button key={item.key} onClick={item.onClick} aria-label={item.label}
+                                    className={`relative flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-2xl active:scale-95 transition-all ${active ? 'nav-active text-amber-300' : item.key === 'scan' ? 'text-amber-300' : 'text-white/70'}`}>
+                                    {item.icon}
+                                    <span className="text-[11px] font-bold">{item.label}</span>
+                                    {item.badge > 0 && (
+                                        <span className="absolute top-0.5 right-1/4 bg-red-500 text-white text-[9px] font-black rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center">{item.badge}</span>
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
-                </div>
+                </nav>
             )}
+
+            <Modal isOpen={!!notesStudentId && !!loggedInAdmin} onClose={() => { setNotesStudentId(''); setNoteDraft(''); }}
+                title={`📝 ملاحظات: ${students.find(s => s.id === notesStudentId)?.name || ''}`}>
+                {(() => {
+                    const st = students.find(s => s.id === notesStudentId);
+                    if (!st || !loggedInAdmin) return null;
+                    const list = visibleNotesOf(st);
+                    const seesAll = canSeeAllNotesOf(st);
+                    const fmtNoteAt = (iso) => {
+                        const d = new Date(iso);
+                        return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ar-EG', { timeZone: 'Africa/Cairo', weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' });
+                    };
+                    return (
+                        <div className="space-y-4">
+                            <div className="text-xs text-white/55">
+                                {st.grade ? `${st.grade} • ` : ''}{assignedServantId(st.id) ? `خادمه: ${admins.find(a => a.id === assignedServantId(st.id))?.name || ''}` : 'مالوش خادم افتقاد'}
+                            </div>
+                            <div className="space-y-2">
+                                <textarea value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} rows={3} maxLength={1000}
+                                    placeholder="اكتب ملاحظة… (مثلًا: عنده امتحانات لحد آخر الشهر)"
+                                    className="w-full glass-input rounded-xl px-3 py-2 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none" />
+                                <button type="button" disabled={!noteDraft.trim()}
+                                    onClick={async () => { const ok = await addNote(st.id, noteDraft); if (ok) { setNoteDraft(''); showToast('✅ اتحفظت الملاحظة.'); } }}
+                                    className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-indigo-950 font-black py-2.5 rounded-xl">حفظ الملاحظة</button>
+                                <p className="text-[11px] text-white/45 leading-relaxed">
+                                    الملاحظة بيشوفها خادم الولد وأمين الفصل والمساعدين والأمين العام. الأولاد مابيشوفوهاش.
+                                    اكتب الحاجات العملية بس، ومتكتبش أسرار عائلية أو تفاصيل حساسة.
+                                </p>
+                                {loggedInAdmin.isSuperAdmin && notesDocKB > 700 && (
+                                    <p className="text-[11px] text-red-300 font-bold">⚠️ مساحة الملاحظات قربت تخلص ({notesDocKB} KB من 1024). قول لـClaude.</p>
+                                )}
+                            </div>
+                            <div className="space-y-2">
+                                <h3 className="text-sm font-black text-white/80">{seesAll ? `كل الملاحظات (${list.length})` : `ملاحظاتك إنت (${list.length})`}</h3>
+                                {list.length === 0 ? (
+                                    <p className="text-center text-sm text-white/45 py-3">لسه مفيش ملاحظات.</p>
+                                ) : list.map((n: any) => (
+                                    <div key={n.id} className="rounded-xl border border-white/12 bg-white/5 p-3 space-y-1.5">
+                                        <div className="text-sm text-white whitespace-pre-wrap break-words">{n.text}</div>
+                                        <div className="flex items-center justify-between gap-2 text-[11px]">
+                                            <span className="text-sky-300">✍️ {n.by} • <span className="text-white/45">{fmtNoteAt(n.at)}</span></span>
+                                            {(loggedInAdmin.isSuperAdmin || n.byId === loggedInAdmin.id) && (
+                                                <button type="button" onClick={() => deleteNote(st.id, n)} className="text-red-300 font-bold px-2 py-0.5 rounded-md hover:bg-red-500/15">مسح</button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                })()}
+            </Modal>
 
             <Modal isOpen={isScannerOpen} onClose={() => setScannerOpen(false)} title="مسح كود الشاب">
                 <QRScanner onScanSuccess={handleScanSuccess} onScanFailure={handleScanFailure} />
@@ -5323,6 +5566,8 @@ const App = () => {
                 {(() => {
                     const servants = admins.filter(a => !a.isSuperAdmin);
                     const fullCount = servants.filter(a => a.role !== 'followup' && !a.isLocked).length;
+                    const gradeOptions = ['أولى ثانوي', 'تانية ثانوي', 'تالتة ثانوي'];
+                    const roleAvatar = { followup: 'bg-rose-500/20 text-rose-200', full: 'bg-sky-500/20 text-sky-200', class_leader: 'bg-emerald-500/20 text-emerald-200', assistant: 'bg-amber-500/20 text-amber-200' };
                     const followupCount = servants.filter(a => a.role === 'followup' && !a.isLocked).length;
                     const lockedCount = servants.filter(a => a.isLocked).length;
                     const groupSize = (id) => students.filter(s => followup.assignments?.[s.id] === id).length;
@@ -5340,7 +5585,7 @@ const App = () => {
                             <div className="grid grid-cols-3 gap-2 text-center">
                                 <div className="bg-sky-500/10 border border-sky-400/30 rounded-xl py-2">
                                     <div className="text-xl font-black text-sky-300">{fullCount}</div>
-                                    <div className="text-[10px] text-sky-200 font-bold">خادم كامل</div>
+                                    <div className="text-[10px] text-sky-200 font-bold">خادم كامل وفوق</div>
                                 </div>
                                 <div className="bg-rose-500/10 border border-rose-400/30 rounded-xl py-2">
                                     <div className="text-xl font-black text-rose-300">{followupCount}</div>
@@ -5359,10 +5604,7 @@ const App = () => {
                                     <input type="text" value={newAdminName} onChange={(e) => setNewAdminName(e.target.value)} placeholder="اسم الخادم (زي ما هيظهر في الافتقاد)" className={inputCls} />
                                     <input type="password" inputMode="numeric" value={newAdminPin} onChange={(e) => setNewAdminPin(e.target.value)} placeholder="الرقم السري (6 أرقام على الأقل)" className={inputCls} />
                                     <div className="grid grid-cols-2 gap-2">
-                                        {[
-                                            { id: 'followup', icon: '📞', title: 'افتقاد بس', desc: 'يشوف مجموعته ويفتقدها. مايضيفش نقط ولا يعدّل حاجة.' },
-                                            { id: 'full', icon: '🛠️', title: 'خادم كامل', desc: 'يسجّل حضور ونقط، ويضيف ويعدّل أولاد، وكمان يفتقد.' },
-                                        ].map(r => (
+                                        {Object.entries(ROLE_INFO).map(([id, info]) => ({ id, ...info })).map(r => (
                                             <button key={r.id} type="button" onClick={() => setNewAdminRole(r.id)}
                                                 className={`text-right rounded-xl border p-2.5 transition-colors ${newAdminRole === r.id ? 'bg-amber-500/15 border-amber-400' : 'bg-indigo-950/60 border-indigo-700'}`}>
                                                 <div className={`text-sm font-black ${newAdminRole === r.id ? 'text-amber-300' : 'text-white'}`}>{newAdminRole === r.id ? '◉' : '○'} {r.icon} {r.title}</div>
@@ -5370,6 +5612,11 @@ const App = () => {
                                             </button>
                                         ))}
                                     </div>
+                                    {newAdminRole === 'class_leader' && (
+                                        <select value={newAdminGrade} onChange={(e) => setNewAdminGrade(e.target.value)} className={inputCls}>
+                                            {gradeOptions.map(g => <option key={g} value={g}>أمين فصل {g}</option>)}
+                                        </select>
+                                    )}
                                     <button onClick={handleAddAdmin} disabled={!newAdminName.trim() || !newAdminPin.trim()}
                                         className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg transition-colors">
                                         <UserPlusIcon className="w-5 h-5" />
@@ -5386,30 +5633,37 @@ const App = () => {
                                 ) : (
                                     <div className="space-y-2.5">
                                         {servants.map(admin => {
-                                            const isFollowupRole = admin.role === 'followup';
+                                            const roleKey = adminRoleKey(admin);
                                             const size = groupSize(admin.id);
                                             return (
                                                 <div key={admin.id} className={`rounded-xl border p-3 space-y-2.5 ${admin.isLocked ? 'bg-slate-800/40 border-slate-600/40 opacity-75' : 'bg-indigo-900/50 border-indigo-700/50'}`}>
                                                     <div className="flex items-center gap-3">
-                                                        <div className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-black text-lg ${isFollowupRole ? 'bg-rose-500/20 text-rose-200' : 'bg-sky-500/20 text-sky-200'}`}>
+                                                        <div className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-black text-lg ${roleAvatar[roleKey]}`}>
                                                             {String(admin.name || '?').trim().charAt(0)}
                                                         </div>
                                                         <div className="min-w-0 flex-1">
                                                             <div className="font-bold text-white truncate">{admin.name}</div>
                                                             <div className="text-[11px] text-indigo-300">
                                                                 {admin.isLocked ? <span className="text-red-300 font-bold">● معطّل</span> : <span className="text-green-300 font-bold">● نشط</span>}
+                                                                <span> • {ROLE_INFO[roleKey].icon} {ROLE_INFO[roleKey].title}{roleKey === 'class_leader' && admin.leaderGrade ? ` ${admin.leaderGrade}` : ''}</span>
                                                                 {size > 0 && <span> • مجموعته {size} ولد</span>}
                                                             </div>
                                                         </div>
                                                     </div>
 
                                                     {/* الصلاحية */}
-                                                    <div className="flex p-1 bg-indigo-950/70 rounded-lg text-xs font-bold">
-                                                        <button type="button" onClick={() => { if (!isFollowupRole) handleToggleAdminRole(admin.id); }}
-                                                            className={`flex-1 py-1.5 rounded-md transition-colors ${isFollowupRole ? 'bg-rose-500 text-white' : 'text-indigo-300'}`}>📞 افتقاد بس</button>
-                                                        <button type="button" onClick={() => { if (isFollowupRole) handleToggleAdminRole(admin.id); }}
-                                                            className={`flex-1 py-1.5 rounded-md transition-colors ${!isFollowupRole ? 'bg-sky-600 text-white' : 'text-indigo-300'}`}>🛠️ خادم كامل</button>
+                                                    <div className="grid grid-cols-2 gap-1 p-1 bg-indigo-950/70 rounded-lg text-xs font-bold">
+                                                        {Object.entries(ROLE_INFO).map(([id, info]: [string, any]) => (
+                                                            <button key={id} type="button" onClick={() => { if (roleKey !== id) handleSetAdminRole(admin.id, id); }}
+                                                                className={`py-1.5 rounded-md transition-colors ${roleKey === id ? 'bg-amber-500 text-indigo-950' : 'text-indigo-200'}`}>{info.icon} {info.title}</button>
+                                                        ))}
                                                     </div>
+                                                    {roleKey === 'class_leader' && (
+                                                        <select value={admin.leaderGrade || ''} onChange={(e) => handleSetAdminRole(admin.id, 'class_leader', e.target.value)} className={inputCls}>
+                                                            {!admin.leaderGrade && <option value="">اختار الصف</option>}
+                                                            {gradeOptions.map(g => <option key={g} value={g}>أمين فصل {g}</option>)}
+                                                        </select>
+                                                    )}
 
                                                     {admin.failedAttempts >= 5 && (
                                                         <button onClick={() => handleUnlockAdminByFailure(admin.id)}

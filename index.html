@@ -8,7 +8,7 @@
     <meta http-equiv="Expires" content="0" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="theme-color" content="#1e1b4b" />
+    <meta name="theme-color" content="#0b1030" />
     <link rel="manifest" href="%BASE_URL%manifest.json" />
     <link rel="icon" type="image/png" href="%BASE_URL%icon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="%BASE_URL%icon-512.png" />
@@ -25,11 +25,71 @@
         font-family: 'Cairo', sans-serif;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
-        background-color: #1e1b4b; /* indigo-950 */
-        background-image:
-          radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0);
-        background-size: 25px 25px;
+        background-color: #0b1030;
+        color: #fff;
       }
+      /* ===== الخلفية الملوّنة اللي ورا الزجاج ===== */
+      body::before {
+        content: ""; position: fixed; inset: -10%; z-index: -1; pointer-events: none;
+        background:
+          radial-gradient(40% 35% at 15% 10%, rgba(99,102,241,0.55), transparent 70%),
+          radial-gradient(35% 30% at 90% 20%, rgba(236,72,153,0.35), transparent 70%),
+          radial-gradient(45% 40% at 80% 85%, rgba(20,184,166,0.35), transparent 70%),
+          radial-gradient(40% 35% at 10% 80%, rgba(245,158,11,0.22), transparent 70%),
+          linear-gradient(160deg, #0b1030 0%, #151a45 50%, #0a1a2e 100%);
+        filter: saturate(120%);
+      }
+
+      /* ===== الزجاج (زي الآيفون) ===== */
+      .glass-panel, .glass-bar, .glass-modal {
+        background: rgba(255,255,255,0.09) !important;
+        border: 1px solid rgba(255,255,255,0.16) !important;
+        -webkit-backdrop-filter: blur(22px) saturate(170%);
+        backdrop-filter: blur(22px) saturate(170%);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.18);
+      }
+      .glass-bar { background: rgba(22,26,60,0.55) !important; }
+      .glass-modal { background: rgba(24,28,64,0.72) !important; }
+      .glass-card {
+        background: rgba(255,255,255,0.08) !important;
+        border: 1px solid rgba(255,255,255,0.14);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.12);
+      }
+      .glass-btn { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.18); }
+      .glass-input { background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.20); color-scheme: dark; }
+      .seg-active { background: rgba(255,255,255,0.20); box-shadow: 0 2px 10px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.25); }
+      .nav-active { background: rgba(255,255,255,0.14); }
+      .admin-tile {
+        position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+        min-height: 120px; padding: 14px 10px; border-radius: 22px; text-align: center;
+        background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.12); transition: transform .15s, background .15s;
+      }
+      .admin-tile:active { transform: scale(0.97); background: rgba(255,255,255,0.14); }
+      .tile-badge {
+        position: absolute; top: 8px; left: 8px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px;
+        background: #ef4444; color: #fff; font-size: 11px; font-weight: 900; display: flex; align-items: center; justify-content: center;
+      }
+
+      /* ===== تحويل الألوان القديمة (البنفسجي الغامق) لزجاج شفاف ===== */
+      .bg-indigo-950 { background-color: rgba(18,22,54,0.55) !important; }
+      .bg-indigo-950\/80, .bg-indigo-950\/70 { background-color: rgba(18,22,54,0.50) !important; }
+      .bg-indigo-950\/60, .bg-indigo-950\/50 { background-color: rgba(10,14,40,0.35) !important; }
+      .bg-indigo-950\/40, .bg-indigo-950\/30, .bg-indigo-950\/15 { background-color: rgba(10,14,40,0.22) !important; }
+      .bg-indigo-900, .bg-indigo-900\/80, .bg-indigo-900\/70 { background-color: rgba(255,255,255,0.08) !important; }
+      .bg-indigo-900\/60, .bg-indigo-900\/50, .bg-indigo-900\/40 { background-color: rgba(255,255,255,0.06) !important; }
+      .bg-indigo-800 { background-color: rgba(255,255,255,0.13) !important; }
+      .bg-indigo-800\/60, .bg-indigo-800\/50, .bg-indigo-800\/40 { background-color: rgba(255,255,255,0.10) !important; }
+      .bg-indigo-800\/20 { background-color: rgba(255,255,255,0.05) !important; }
+      .bg-indigo-700 { background-color: rgba(255,255,255,0.18) !important; }
+      .bg-slate-900\/60 { background-color: rgba(10,14,40,0.35) !important; }
+      .hover\:bg-indigo-800:hover, .hover\:bg-indigo-800\/50:hover, .hover\:bg-indigo-800\/60:hover,
+      .hover\:bg-indigo-700:hover { background-color: rgba(255,255,255,0.16) !important; }
+      .border-indigo-950, .border-indigo-900, .border-indigo-900\/60, .border-indigo-900\/50, .border-indigo-900\/30, .border-indigo-900\/20 { border-color: rgba(255,255,255,0.08) !important; }
+      .border-indigo-800, .border-indigo-800\/60, .border-indigo-800\/50, .border-indigo-800\/40 { border-color: rgba(255,255,255,0.13) !important; }
+      .border-indigo-700, .border-indigo-700\/60, .border-indigo-700\/50, .border-indigo-700\/40, .border-indigo-600 { border-color: rgba(255,255,255,0.18) !important; }
+      .rounded-xl { border-radius: 16px; }
+      input, select, textarea { color-scheme: dark; }
       .animate-fade-in-out {
         animation: fadeInOut 3s ease-in-out;
       }
@@ -56,7 +116,7 @@
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register(new URL('sw.js?v=2026.09.24.1', document.baseURI))
+          navigator.serviceWorker.register(new URL('sw.js?v=2026.10.01.33', document.baseURI))
             .then(reg => console.log('Service Worker registered!', reg))
             .catch(err => console.log('Service Worker registration failed: ', err));
         });
