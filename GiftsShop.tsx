@@ -114,6 +114,12 @@ const GiftsShopWidget: React.FC = () => {
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(() => !!(window as any).__isMinaAdmin);
+  const [servantLoggedIn, setServantLoggedIn] = useState(() => !!(window as any).__isServantLoggedIn);
+  useEffect(() => {
+    const h = (e: any) => setServantLoggedIn(!!e.detail);
+    window.addEventListener('servant-login-status', h);
+    return () => window.removeEventListener('servant-login-status', h);
+  }, []);
   const [adminTab, setAdminTab] = useState<'products' | 'orders'>('products');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [orderingProduct, setOrderingProduct] = useState<Product | null>(null);
@@ -250,7 +256,7 @@ const GiftsShopWidget: React.FC = () => {
   return (
     <>
       {/* الزرار العائم - ظاهر للأولاد عشان يطلبوا هدايا، مخفي عند مينا لأن عنده زرار مخصص فوق */}
-      {!isAdmin && (
+      {!isAdmin && !servantLoggedIn && (
       <button
         onClick={() => setOpen(true)}
         style={{
@@ -487,15 +493,17 @@ const GiftsShopWidget: React.FC = () => {
                 if (idx === -1) throw new Error('الطالب مش موجود، حاول تاني');
 
                 const liveStudent = items[idx];
-                const total = getTotalPoints(liveStudent);
-                if (total < orderingProduct.points) throw new Error('رصيد النقط مش كافي لشراء الهدية دي');
-
                 const product = shopNow.products.find(p => p.id === orderingProduct.id);
                 const sizeObj = product?.sizes.find(s => s.label === size);
                 if (!product || !sizeObj || sizeObj.qty <= 0) throw new Error('نفذت الكمية، جرب هدية تانية');
+                // السعر من قاعدة البيانات نفسها (لو الأدمن غيّره وإنت فاتح الصفحة)
+                const price = Number(product.points) || 0;
+                if (price <= 0) throw new Error('سعر الهدية مش مظبوط، كلّم الخادم');
+                const total = getTotalPoints(liveStudent);
+                if (total < price) throw new Error('رصيد النقط مش كافي لشراء الهدية دي');
 
                 // اخصم من نقط السنة الحالية الأول، ولو مش كفاية خد الباقي من نقط السنين اللي فاتت
-                let remaining = orderingProduct.points;
+                let remaining = price;
                 let newPoints = Number(liveStudent.points) || 0;
                 let newPrev = Number(liveStudent.previousYearsPoints) || 0;
                 const fromCurrent = Math.min(newPoints, remaining);
@@ -508,7 +516,7 @@ const GiftsShopWidget: React.FC = () => {
                 const historyRecord = {
                   id: genId(),
                   date: cairoDateKey,
-                  points: -orderingProduct.points,
+                  points: -price,
                   type: 'giftPurchase',
                   typeName: 'شراء من متجر الهدايا',
                   description: `${orderingProduct.name}${size && size !== 'عادي' ? ` (${size})` : ''}`,
@@ -528,7 +536,7 @@ const GiftsShopWidget: React.FC = () => {
                 const newOrder: Order = {
                   id: genId(), productId: product.id, productName: product.name,
                   size, studentName: liveStudent.name, studentPhone: liveStudent.phone,
-                  points: orderingProduct.points, status: 'reserved', createdAt: new Date().toISOString(),
+                  points: price, status: 'reserved', createdAt: new Date().toISOString(),
                   studentId: liveStudent.id, deductedCurrent: fromCurrent, deductedPrev: remaining,
                 };
 
