@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction, deleteField } from 'firebase/f
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.10.01.v31';
+const APP_VERSION = '2026.10.01.v32';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -562,14 +562,17 @@ const Modal = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-70 z-50 flex justify-center items-center p-4"
+      className="fixed inset-0 bg-black bg-opacity-70 z-50 flex justify-center items-center p-3 sm:p-4"
+      style={{ paddingTop: 'max(12px, env(safe-area-inset-top, 0px))', paddingBottom: 'max(12px, env(safe-area-inset-bottom, 0px))' }}
       onClick={onClose}
     >
+      {/* النافذة ليها أقصى طول (قد الشاشة)، والعنوان ثابت فوق، والمحتوى بيتسكرول لو طويل */}
       <div 
-        className="bg-indigo-950 rounded-2xl shadow-xl w-full max-w-md mx-auto text-white border border-indigo-800 transform transition-all"
+        className="bg-indigo-950 rounded-2xl shadow-xl w-full max-w-md mx-auto text-white border border-indigo-800 flex flex-col max-h-full overflow-hidden"
+        style={{ maxHeight: 'min(92dvh, 100%)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex justify-between items-center p-4 border-b border-indigo-800">
+        <div className="shrink-0 flex justify-between items-center p-4 border-b border-indigo-800">
           <h2 className="text-xl font-bold text-amber-400">{title}</h2>
           <button 
             onClick={onClose} 
@@ -578,7 +581,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
             <XIcon className="w-6 h-6" />
           </button>
         </div>
-        <div className="p-6">
+        <div className="p-4 sm:p-6 overflow-y-auto overscroll-contain flex-1 min-h-0" style={{ WebkitOverflowScrolling: 'touch' }}>
           {children}
         </div>
       </div>
