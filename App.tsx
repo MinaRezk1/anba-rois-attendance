@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.10.01.v22';
+const APP_VERSION = '2026.10.01.v23';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -2786,10 +2786,13 @@ const App = () => {
                 return { candidate, prevPoints };
             })
             .filter(item => item.prevPoints > 0)
-            .sort((a, b) => b.prevPoints - a.prevPoints || a.candidate.name.localeCompare(b.candidate.name, 'ar'))
-            .slice(0, 3);
+            .sort((a, b) => b.prevPoints - a.prevPoints || a.candidate.name.localeCompare(b.candidate.name, 'ar'));
+        // التعادل: اللي متساويين في النقط بياخدوا نفس المركز ونفس المكافأة،
+        // واللي بعدهم بياخد المركز اللي عليه الدور (مثال: الأول، الثاني، الثاني، الثالث)
+        const topScores = [...new Set(prevMonthRanking.map(item => item.prevPoints))].slice(0, 3);
 
-        prevMonthRanking.forEach((item, index) => {
+        prevMonthRanking.filter(item => topScores.includes(item.prevPoints)).forEach((item) => {
+            const index = topScores.indexOf(item.prevPoints);
             const rank = index + 1;
             const rankTitles = ['المركز الأول', 'المركز الثاني', 'المركز الثالث'];
             const rankPoints = [20, 15, 10];
@@ -3765,7 +3768,12 @@ const App = () => {
                                  <p className="text-center text-indigo-300 mt-10">لا يوجد بيانات لعرضها في هذه التصفية.</p>
                              ) : (
                                  leaderboardStudents.map((student, index) => {
-                                     const rank = index + 1;
+                                     // المتساويين في النقط بياخدوا نفس المركز (الأول، الثاني، الثاني، الثالث...)
+                                     const rank = 1 + new Set(
+                                         leaderboardStudents
+                                             .map(s => Number(s.pointsForLeaderboard || 0))
+                                             .filter(p => p > Number(student.pointsForLeaderboard || 0))
+                                     ).size;
                                      const currentMonthPrefix = getCairoMonthPrefix();
                                      const prevMonthPrefix = getCairoMonthPrefixOffset(-1);
                                      const filterPrefix = leaderboardFilter === 'prev_month' ? prevMonthPrefix : (leaderboardFilter === 'current_month' ? currentMonthPrefix : undefined);
