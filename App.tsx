@@ -10,7 +10,7 @@ import { doc, onSnapshot, setDoc, runTransaction } from 'firebase/firestore';
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.09.26.v21';
+const APP_VERSION = '2026.10.01.v22';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -2715,49 +2715,6 @@ const App = () => {
                 });
             }
 
-            // 3. Monthly leaderboard rewards for the previous month (manual notification only)
-            const prevMonthRanking = [...students]
-                .map(candidate => {
-                    const prevPoints = (candidate.attendanceHistory || [])
-                        .filter(h => h.date && h.date.startsWith(prevMonthPrefix))
-                        .filter(h => h.typeName !== 'مكافأة لوحة الصدارة' && !(h.meta && h.meta.startsWith('leaderboard_reward_')))
-                        .reduce((sum, h) => sum + Number(h.points || 0), 0);
-                    return { candidate, prevPoints };
-                })
-                .filter(item => item.prevPoints > 0)
-                .sort((a, b) => b.prevPoints - a.prevPoints || a.candidate.name.localeCompare(b.candidate.name, 'ar'))
-                .slice(0, 3);
-
-            prevMonthRanking.forEach((item, index) => {
-                const rank = index + 1;
-                const rankTitles = ['المركز الأول', 'المركز الثاني', 'المركز الثالث'];
-                const rankPoints = [20, 15, 10];
-                const rankEmojis = ['🥇', '🥈', '🥉'];
-                const candidate = item.candidate;
-                const awardMeta = `leaderboard_reward_${prevMonthPrefix}_rank_${rank}`;
-                const awardRecord = (candidate.attendanceHistory || []).find(h => h.meta === awardMeta);
-
-                alerts.push({
-                    id: `leaderboard_${prevMonthPrefix}_rank_${rank}_${candidate.id}`,
-                    studentId: candidate.id,
-                    studentName: candidate.name,
-                    student: candidate,
-                    badgeId: `leaderboard_rank_${rank}`,
-                    badgeTitle: `${rankEmojis[index]} ${rankTitles[index]} في الشهر`,
-                    badgeEmoji: rankEmojis[index],
-                    category: 'monthly',
-                    categoryLabel: 'مكافآت ترتيب الشهر',
-                    periodLabel: getArabicMonthName(prevMonthPrefix),
-                    monthPrefix: prevMonthPrefix,
-                    description: `أنهى الشهر في ${rankTitles[index]} برصيد ${item.prevPoints} نقطة قبل مكافآت ترتيب الشهر.`,
-                    progress: `${item.prevPoints} نقطة`,
-                    isAwarded: !!awardRecord,
-                    awardedRecord: awardRecord,
-                    suggestedPoints: rankPoints[index],
-                    color: index === 0 ? 'from-amber-400 to-yellow-500' : index === 1 ? 'from-slate-300 to-slate-500' : 'from-orange-400 to-amber-700'
-                });
-            });
-
             // 3. Cumulative / Milestone Badges (أوسمة تراكمية وموسمية)
             BADGES_CONFIG.filter(b => b.category === 'cumulative').forEach(badge => {
                 const isUnlocked = badge.check(history, pts, undefined);
@@ -2815,6 +2772,50 @@ const App = () => {
                         color: badge.color
                     });
                 }
+            });
+        });
+
+        // 3. مكافآت ترتيب الشهر اللي فات (أول 3): بتتحسب مرة واحدة بس للكل.
+        // (قبل كده كانت جوه اللوب بتاع كل طالب، فكانت بتتكرر مرة لكل ولد: 87 × 3 = 261 تنبيه)
+        const prevMonthRanking = [...students]
+            .map(candidate => {
+                const prevPoints = (candidate.attendanceHistory || [])
+                    .filter(h => h.date && h.date.startsWith(prevMonthPrefix))
+                    .filter(h => h.typeName !== 'مكافأة لوحة الصدارة' && !(h.meta && h.meta.startsWith('leaderboard_reward_')))
+                    .reduce((sum, h) => sum + Number(h.points || 0), 0);
+                return { candidate, prevPoints };
+            })
+            .filter(item => item.prevPoints > 0)
+            .sort((a, b) => b.prevPoints - a.prevPoints || a.candidate.name.localeCompare(b.candidate.name, 'ar'))
+            .slice(0, 3);
+
+        prevMonthRanking.forEach((item, index) => {
+            const rank = index + 1;
+            const rankTitles = ['المركز الأول', 'المركز الثاني', 'المركز الثالث'];
+            const rankPoints = [20, 15, 10];
+            const rankEmojis = ['🥇', '🥈', '🥉'];
+            const candidate = item.candidate;
+            const awardMeta = `leaderboard_reward_${prevMonthPrefix}_rank_${rank}`;
+            const awardRecord = (candidate.attendanceHistory || []).find(h => h.meta === awardMeta);
+
+            alerts.push({
+                id: `leaderboard_${prevMonthPrefix}_rank_${rank}_${candidate.id}`,
+                studentId: candidate.id,
+                studentName: candidate.name,
+                student: candidate,
+                badgeId: `leaderboard_rank_${rank}`,
+                badgeTitle: `${rankEmojis[index]} ${rankTitles[index]} في الشهر`,
+                badgeEmoji: rankEmojis[index],
+                category: 'monthly',
+                categoryLabel: 'مكافآت ترتيب الشهر',
+                periodLabel: getArabicMonthName(prevMonthPrefix),
+                monthPrefix: prevMonthPrefix,
+                description: `أنهى الشهر في ${rankTitles[index]} برصيد ${item.prevPoints} نقطة قبل مكافآت ترتيب الشهر.`,
+                progress: `${item.prevPoints} نقطة`,
+                isAwarded: !!awardRecord,
+                awardedRecord: awardRecord,
+                suggestedPoints: rankPoints[index],
+                color: index === 0 ? 'from-amber-400 to-yellow-500' : index === 1 ? 'from-slate-300 to-slate-500' : 'from-orange-400 to-amber-700'
             });
         });
 
