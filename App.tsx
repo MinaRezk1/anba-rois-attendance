@@ -11,7 +11,7 @@ import { doc, onSnapshot, setDoc, runTransaction, deleteField } from 'firebase/f
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.10.02.v37';
+const APP_VERSION = '2026.10.02.v38';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -3737,14 +3737,22 @@ const App = () => {
                                                      const cDone = cumulative.filter(x => x.isUnlocked).length;
                                                      return (
                                                          <div className="mt-4 pt-3 border-t border-indigo-800/50">
-                                                             <div className="flex items-center justify-between gap-2 mb-2">
-                                                                 <span className="text-sm font-bold text-indigo-200">🎖️ الأوسمة</span>
-                                                                 <span className="text-[11px] text-white/55">الشهر ده <b className={mDone === monthly.length ? 'text-amber-300' : 'text-white/80'}>{mDone}/{monthly.length}</b> • الألقاب <b className="text-white/80">{cDone}/{cumulative.length}</b></span>
-                                                             </div>
-                                                             <div className="flex flex-wrap items-center gap-1.5">
-                                                                 {monthly.map(dot)}
-                                                                 <span className="w-px h-7 bg-white/15 mx-1" />
-                                                                 {cumulative.map(dot)}
+                                                             <div className="text-sm font-bold text-indigo-200 mb-2">🎖️ الأوسمة</div>
+                                                             <div className="space-y-2">
+                                                                 <div className="flex items-center gap-2">
+                                                                     <div className="w-20 shrink-0 leading-tight">
+                                                                         <div className="text-[11px] font-bold text-amber-200/90">الشهر ده</div>
+                                                                         <div className={`text-[11px] font-black ${mDone === monthly.length ? 'text-amber-300' : 'text-white/50'}`}>{mDone}/{monthly.length}{mDone === monthly.length ? ' ✨' : ''}</div>
+                                                                     </div>
+                                                                     <div className="flex flex-wrap items-center gap-1.5">{monthly.map(dot)}</div>
+                                                                 </div>
+                                                                 <div className="flex items-center gap-2 pt-2 border-t border-white/10">
+                                                                     <div className="w-20 shrink-0 leading-tight">
+                                                                         <div className="text-[11px] font-bold text-sky-200/90">الألقاب</div>
+                                                                         <div className="text-[11px] font-black text-white/50">{cDone}/{cumulative.length}</div>
+                                                                     </div>
+                                                                     <div className="flex flex-wrap items-center gap-1.5">{cumulative.map(dot)}</div>
+                                                                 </div>
                                                              </div>
                                                          </div>
                                                      );
