@@ -11,7 +11,7 @@ import { doc, onSnapshot, setDoc, runTransaction, deleteField } from 'firebase/f
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.10.02.v38';
+const APP_VERSION = '2026.10.02.v39';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -1362,6 +1362,16 @@ const App = () => {
     const [atRiskOpen, setAtRiskOpen] = useState(true);
     const [monthReportOpen, setMonthReportOpen] = useState(false);
     const [monthReportPrefix, setMonthReportPrefix] = useState('');
+    // الافتقاد مابيتحسبش بمجرد الضغط: الخادم لازم يرجع ويقول حصل إيه
+    const [pendingContact, setPendingContact] = useState<any>(() => {
+        try {
+            const p = JSON.parse(localStorage.getItem('pending_followup_contact') || 'null');
+            return p && Date.now() - Number(p.startedAt || 0) < 6 * 3600 * 1000 ? p : null;
+        } catch (e) { return null; }
+    });
+    const [outcomeModal, setOutcomeModal] = useState<any>(null);
+    const [outcomeNote, setOutcomeNote] = useState('');
+    const hiddenAtRef = useRef(0);
     const [noteDraft, setNoteDraft] = useState('');
     const [followupGrade, setFollowupGrade] = useState('أولى ثانوي');
     const [followupAssignPickerOpen, setFollowupAssignPickerOpen] = useState(false);
@@ -2967,10 +2977,15 @@ const App = () => {
         const servants = admins.map(a => {
             const group = scoped.filter(s => assignedServantId(s.id) === a.id);
             if (!group.length) return null;
-            let absent = 0, done = 0;
-            meetings.forEach(m => group.forEach(s => { if (!m.attendees.has(s.id)) { absent++; if (wasContactedForMeeting(m.date, s.id)) done++; } }));
+            let absent = 0, done = 0, replied = 0, quick = 0;
+            meetings.forEach(m => group.forEach(s => {
+                if (m.attendees.has(s.id)) return;
+                absent++;
+                const c = contactForMeeting(m.date, s.id);
+                if (c) { done++; if (isRepliedOutcome(c.outcome)) replied++; if (c.quick) quick++; }
+            }));
             const notesN = group.reduce((n, s) => n + allNotesOf(s.id).filter((x: any) => x.byId === a.id && String(x.date || x.at || '').startsWith(prefix)).length, 0);
-            return { a, size: group.length, absent, done, pct: absent ? Math.round((done / absent) * 100) : 100, notesN };
+            return { a, size: group.length, absent, done, replied, quick, pct: absent ? Math.round((done / absent) * 100) : 100, notesN };
         }).filter(Boolean).sort((x: any, y: any) => y.pct - x.pct);
         const trackingStart = Object.keys(followupHistory || {}).sort()[0] || latestMeetingDate || '';
         return { prefix, scoped, meetings, perMeeting, grades, totalAvg, massKids, confessions, newKids, committed, servants, atRisk: atRiskStudents.filter(inScope), never: neverCameStudents.filter(inScope), trackingStart };
@@ -2984,15 +2999,15 @@ const App = () => {
     const unassignedAbsentCount = students.filter(s => !assignedServantId(s.id) && isAbsentNow(s.id)).length;
     const unassignedCount = students.filter(s => !assignedServantId(s.id)).length;
 
-    const recordFollowupContact = (studentId, method) => {
+    const recordFollowupContact = (studentId, method, extra: any = {}) => {
         if (!loggedInAdmin) return;
-        const entry = { date: getCairoDateKey(), by: loggedInAdmin.name, byId: loggedInAdmin.id, method, at: new Date().toISOString() };
+        const entry = { date: getCairoDateKey(), by: loggedInAdmin.name, byId: loggedInAdmin.id, method, at: new Date().toISOString(), ...extra };
         setDoc(FOLLOWUP_DOC_REF(), {
             contacts: { [studentId]: entry },
         }, { merge: true }).catch(err => { console.error(err); showToast('⚠️ فشل الحفظ، جرّب تاني.'); });
         // نسخة في سجل الاجتماع ده (مابتتمسحش لما ييجي اجتماع جديد)
         if (latestMeetingDate) {
-            setDoc(FOLLOWUP_HISTORY_REF(), { byMeeting: { [latestMeetingDate]: { [studentId]: { byId: entry.byId, method, at: entry.at } } } }, { merge: true })
+            setDoc(FOLLOWUP_HISTORY_REF(), { byMeeting: { [latestMeetingDate]: { [studentId]: { byId: entry.byId, method, at: entry.at, ...(entry.outcome ? { outcome: entry.outcome } : {}), ...(entry.quick ? { quick: true } : {}) } } } }, { merge: true })
                 .catch(err => console.error('Follow-up history save error:', err));
         }
     };
@@ -3000,6 +3015,73 @@ const App = () => {
     const wasContactedForMeeting = (meetingDate, studentId) => {
         if (meetingDate === latestMeetingDate) return isFollowupContacted(studentId);
         return Boolean(followupHistory?.[meetingDate]?.[studentId]);
+    };
+    const contactForMeeting = (meetingDate, studentId) => {
+        if (meetingDate === latestMeetingDate) return isFollowupContacted(studentId) ? followup.contacts?.[studentId] : null;
+        return followupHistory?.[meetingDate]?.[studentId] || null;
+    };
+
+    // ===== نتيجة الافتقاد =====
+    const savePendingContact = (p) => {
+        setPendingContact(p);
+        try { if (p) localStorage.setItem('pending_followup_contact', JSON.stringify(p)); else localStorage.removeItem('pending_followup_contact'); } catch (e) {}
+    };
+    // الخادم داس واتساب أو اتصال: لسه ماتحسبش، بنستنى يرجع
+    const startFollowupContact = (studentId, method) => {
+        if (!loggedInAdmin) return;
+        hiddenAtRef.current = 0;
+        savePendingContact({ studentId, method, startedAt: Date.now(), byId: loggedInAdmin.id });
+    };
+    const openOutcome = (p, awayMs = null) => { setOutcomeNote(''); setOutcomeModal({ ...p, awayMs }); };
+    useEffect(() => {
+        const onVis = () => {
+            if (document.hidden) { hiddenAtRef.current = Date.now(); return; }
+            if (!pendingContact || outcomeModal || !loggedInAdmin || pendingContact.byId !== loggedInAdmin.id) return;
+            if (!hiddenAtRef.current) return; // لسه ماخرجش من الموقع
+            const away = Date.now() - hiddenAtRef.current;
+            hiddenAtRef.current = 0;
+            openOutcome(pendingContact, away);
+        };
+        document.addEventListener('visibilitychange', onVis);
+        return () => document.removeEventListener('visibilitychange', onVis);
+    }, [pendingContact, outcomeModal, loggedInAdmin]);
+    // لو الموقع اتقفل واتفتح تاني وهو لسه ماقالش حصل إيه
+    useEffect(() => {
+        if (!pendingContact || outcomeModal || !loggedInAdmin || pendingContact.byId !== loggedInAdmin.id) return;
+        if (Date.now() - Number(pendingContact.startedAt || 0) > 4000 && !document.hidden && !hiddenAtRef.current) {
+            openOutcome(pendingContact, Date.now() - Number(pendingContact.startedAt || 0));
+        }
+    }, [loggedInAdmin]);
+    const FOLLOWUP_OUTCOMES = {
+        replied: { icon: '💬', label: 'رد عليا', short: 'رد' },
+        no_reply: { icon: '✉️', label: 'بعتّله ومردش لسه', short: 'مردش' },
+        no_answer: { icon: '📵', label: 'مردش على المكالمة', short: 'مردش' },
+        met: { icon: '🤝', label: 'قابلته أو كلمته بطريقة تانية', short: 'قابله' },
+        unreachable: { icon: '❌', label: 'معرفتش أوصله', short: 'ماوصلوش' },
+    };
+    const OUTCOMES_BY_METHOD = { whatsapp: ['replied', 'no_reply', 'unreachable'], call: ['replied', 'no_answer', 'unreachable'], manual: ['met', 'replied', 'unreachable'] };
+    const isRepliedOutcome = (o) => o === 'replied' || o === 'met';
+    const QUICK_MS = 5000;
+    const finishFollowupContact = (outcome) => {
+        if (!outcomeModal) return;
+        const note = outcomeNote.trim();
+        if (outcome === 'unreachable' && !note) { showToast('اكتب في سطر ليه معرفتش توصله.'); return; }
+        const quick = outcomeModal.method !== 'manual' && outcomeModal.awayMs !== null && outcomeModal.awayMs < QUICK_MS;
+        recordFollowupContact(outcomeModal.studentId, outcomeModal.method, {
+            outcome, ...(quick ? { quick: true } : {}),
+            ...(outcomeModal.awayMs !== null ? { awaySec: Math.round(outcomeModal.awayMs / 1000) } : {}),
+        });
+        if (note) addNote(outcomeModal.studentId, `${FOLLOWUP_OUTCOMES[outcome].icon} ${FOLLOWUP_OUTCOMES[outcome].label}: ${note}`);
+        savePendingContact(null);
+        setOutcomeModal(null);
+        setOutcomeNote('');
+        showToast('✅ اتسجل الافتقاد.');
+    };
+    const cancelFollowupContact = () => {
+        savePendingContact(null);
+        setOutcomeModal(null);
+        setOutcomeNote('');
+        showToast('ماتسجلش افتقاد.');
     };
     const toggleFollowupContacted = (studentId) => {
         if (!loggedInAdmin) return;
@@ -3012,8 +3094,7 @@ const App = () => {
                 .then(() => showToast('اتشالت علامة الافتقاد.'))
                 .catch(err => { console.error(err); showToast('⚠️ فشل الحفظ، جرّب تاني.'); });
         } else {
-            recordFollowupContact(studentId, 'manual');
-            showToast('✅ اتسجل إنه اتافتقد.');
+            openOutcome({ studentId, method: 'manual', startedAt: Date.now(), byId: loggedInAdmin.id }, null);
         }
     };
     const assignFollowup = (studentId, adminId) => {
@@ -4537,13 +4618,13 @@ const App = () => {
                                     </div>
                                     <div className="grid grid-cols-3 gap-2">
                                         {wa ? (
-                                            <a href={`https://wa.me/${wa}?text=${waText}`} target="_blank" rel="noopener noreferrer" onClick={() => recordFollowupContact(s.id, 'whatsapp')}
+                                            <a href={`https://wa.me/${wa}?text=${waText}`} target="_blank" rel="noopener noreferrer" onClick={() => startFollowupContact(s.id, 'whatsapp')}
                                                 className="flex items-center justify-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs font-bold py-2 rounded-lg">
                                                 <WhatsAppIcon className="w-4 h-4" /> واتساب
                                             </a>
                                         ) : <span className="flex items-center justify-center bg-indigo-950/60 text-indigo-400 text-[11px] font-bold py-2 rounded-lg">مفيش رقم</span>}
                                         {wa ? (
-                                            <a href={`tel:${s.phone}`} onClick={() => recordFollowupContact(s.id, 'call')}
+                                            <a href={`tel:${s.phone}`} onClick={() => startFollowupContact(s.id, 'call')}
                                                 className="flex items-center justify-center gap-1 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold py-2 rounded-lg">📞 اتصال</a>
                                         ) : <span className="flex items-center justify-center bg-indigo-950/60 text-indigo-400 text-[11px] font-bold py-2 rounded-lg">—</span>}
                                         <button type="button" onClick={() => toggleFollowupContacted(s.id)}
@@ -4551,8 +4632,15 @@ const App = () => {
                                             {done ? '✅ اتافتقد' : 'افتقدته'}
                                         </button>
                                     </div>
+                                    {!done && pendingContact?.studentId === s.id && (
+                                        <button type="button" onClick={() => openOutcome(pendingContact, hiddenAtRef.current ? Date.now() - hiddenAtRef.current : null)}
+                                            className="w-full text-xs font-black py-2 rounded-lg bg-amber-500 text-indigo-950">⏳ قول حصل إيه علشان يتحسب افتقاد</button>
+                                    )}
                                     {done && contact && (
-                                        <div className="text-[11px] text-emerald-300">اتافتقد ({methodLabel(contact.method)}) {fmt(contact.date, { weekday: 'long', day: 'numeric', month: 'long' })} بواسطة {contact.by}</div>
+                                        <div className="text-[11px] text-emerald-300">
+                                            اتافتقد ({methodLabel(contact.method)}{contact.outcome && FOLLOWUP_OUTCOMES[contact.outcome] ? ` • ${FOLLOWUP_OUTCOMES[contact.outcome].icon} ${FOLLOWUP_OUTCOMES[contact.outcome].short}` : ''}) {fmt(contact.date, { weekday: 'long', day: 'numeric', month: 'long' })} بواسطة {contact.by}
+                                            {contact.quick && <span className="text-amber-300 font-bold"> • ⚡ رجع بسرعة</span>}
+                                        </div>
                                     )}
                                     {(() => {
                                         const last = visibleNotesOf(s)[0];
@@ -4719,6 +4807,19 @@ const App = () => {
                                                             </span>
                                                         </div>
                                                         {r.absent.length > 0 && bar(r.done.length, r.absent.length)}
+                                                        {r.done.length > 0 && (() => {
+                                                            const cs = r.done.map(s => followup.contacts?.[s.id] || {});
+                                                            const replied = cs.filter(c => isRepliedOutcome(c.outcome)).length;
+                                                            const noReply = cs.filter(c => c.outcome && !isRepliedOutcome(c.outcome)).length;
+                                                            const quickN = cs.filter(c => c.quick).length;
+                                                            return (
+                                                                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-bold">
+                                                                    <span className="text-emerald-300">💬 {replied} ردوا</span>
+                                                                    <span className="text-white/55">🔕 {noReply} مردوش</span>
+                                                                    {quickN > 0 && <span className="text-amber-300">⚡ {quickN} رجع بسرعة</span>}
+                                                                </div>
+                                                            );
+                                                        })()}
                                                         <div className="flex justify-between gap-2 text-[11px] text-indigo-300">
                                                             <span>مجموعته {r.group.length} ولد • 📝 {notesCountBy(r.admin.id)} ملاحظة آخر شهر</span>
                                                             <span className="text-left">{r.lastActivity ? `آخر استخدام: ${fmtAt(r.lastActivity)}` : 'ماستخدمش الافتقاد لسه'}</span>
@@ -4734,7 +4835,7 @@ const App = () => {
                                                                     <div key={s.id} className="py-1.5 space-y-1">
                                                                         <div className="flex items-center justify-between gap-2 text-xs">
                                                                             <span className="text-white truncate">{isDone ? '✅' : '⏳'} {s.name} <span className="text-indigo-400">({s.grade || ''})</span></span>
-                                                                            <span className={`shrink-0 ${isDone ? 'text-emerald-300' : 'text-red-300'}`}>{isDone ? methodLabel(followup.contacts?.[s.id]?.method) : 'لسه ماتافتقدش'}</span>
+                                                                            <span className={`shrink-0 ${isDone ? 'text-emerald-300' : 'text-red-300'}`}>{isDone ? (() => { const c = followup.contacts?.[s.id] || {}; const o = FOLLOWUP_OUTCOMES[c.outcome]; return `${methodLabel(c.method)}${o ? ` • ${o.icon} ${o.short}` : ''}${c.quick ? ' ⚡' : ''}`; })() : 'لسه ماتافتقدش'}</span>
                                                                         </div>
                                                                         <div className="flex items-center gap-2">
                                                                             <div className="flex-1 min-w-0 text-[11px] text-white/55 truncate">{last ? <>📝 {last.text} <span className="text-white/35">— {noteLine(last)}</span></> : 'مفيش ملاحظات'}</div>
@@ -5206,14 +5307,14 @@ const App = () => {
                                 <div style={h2}>📞 الافتقاد (لكل خادم)</div>
                                 {r.servants.length === 0 ? <p style={{ fontSize: 12, color: '#64748b' }}>لسه مفيش مجموعات متوزعة.</p> : (
                                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                        <thead><tr><th style={th}>الخادم</th><th style={th}>مجموعته</th><th style={th}>حالات غياب</th><th style={th}>افتقد</th><th style={th}>النسبة</th><th style={th}>ملاحظات</th></tr></thead>
+                                        <thead><tr><th style={th}>الخادم</th><th style={th}>مجموعته</th><th style={th}>غياب</th><th style={th}>افتقد</th><th style={th}>ردوا</th><th style={th}>النسبة</th><th style={th}>⚡</th><th style={th}>ملاحظات</th></tr></thead>
                                         <tbody>{r.servants.map((x: any) => (
-                                            <tr key={x.a.id}><td style={{ ...td, fontWeight: 800 }}>{x.a.name}</td><td style={td}>{x.size}</td><td style={td}>{x.absent}</td><td style={td}>{x.done}</td>
-                                                <td style={{ ...td, fontWeight: 900, color: x.pct >= 70 ? '#059669' : x.pct >= 30 ? '#d97706' : '#dc2626' }}>{x.absent ? `${x.pct}%` : '—'}</td><td style={td}>{x.notesN}</td></tr>
+                                            <tr key={x.a.id}><td style={{ ...td, fontWeight: 800 }}>{x.a.name}</td><td style={td}>{x.size}</td><td style={td}>{x.absent}</td><td style={td}>{x.done}</td><td style={td}>{x.replied}</td>
+                                                <td style={{ ...td, fontWeight: 900, color: x.pct >= 70 ? '#059669' : x.pct >= 30 ? '#d97706' : '#dc2626' }}>{x.absent ? `${x.pct}%` : '—'}</td><td style={{ ...td, color: x.quick ? '#d97706' : '#94a3b8' }}>{x.quick || '—'}</td><td style={td}>{x.notesN}</td></tr>
                                         ))}</tbody>
                                     </table>
                                 )}
-                                {r.trackingStart && <p style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>* تسجيل الافتقاد لكل اجتماع بدأ من {dShort(r.trackingStart)}، فالاجتماعات اللي قبل كده ممكن تبان أقل من الحقيقة. والمجموعات محسوبة على التوزيع الحالي.</p>}
+                                {r.trackingStart && <p style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>* تسجيل الافتقاد لكل اجتماع بدأ من {dShort(r.trackingStart)}، فالاجتماعات اللي قبل كده ممكن تبان أقل من الحقيقة. والمجموعات محسوبة على التوزيع الحالي. ⚡ = الخادم رجع للموقع بعد أقل من 5 ثواني من ما داس واتساب أو اتصال.</p>}
 
                                 <div style={h2}>⭐ أكتر الأولاد التزامًا</div>
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -5247,6 +5348,36 @@ const App = () => {
                     </div>
                 );
             })(), document.body)}
+
+            <Modal isOpen={!!outcomeModal && !!loggedInAdmin} onClose={() => setOutcomeModal(null)}
+                title={`📞 حصل إيه مع ${students.find(s => s.id === outcomeModal?.studentId)?.name || ''}؟`}>
+                {outcomeModal && (() => {
+                    const opts = OUTCOMES_BY_METHOD[outcomeModal.method] || OUTCOMES_BY_METHOD.manual;
+                    const quick = outcomeModal.method !== 'manual' && outcomeModal.awayMs !== null && outcomeModal.awayMs < QUICK_MS;
+                    return (
+                        <div className="space-y-3">
+                            {quick && (
+                                <p className="text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-xl p-2.5">
+                                    ⚡ رجعت بسرعة. لو لسه مابعتّش أو ماكلمتش، دوس "لسه ماعملتش" تحت.
+                                </p>
+                            )}
+                            <div className="space-y-2">
+                                {opts.map(o => (
+                                    <button key={o} type="button" onClick={() => finishFollowupContact(o)}
+                                        className={`w-full text-right flex items-center gap-3 rounded-xl border px-3.5 py-3 font-bold ${o === 'unreachable' ? 'border-red-400/30 bg-red-500/10 text-red-100' : isRepliedOutcome(o) ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-100' : 'border-white/15 bg-white/5 text-white'}`}>
+                                        <span className="text-xl">{FOLLOWUP_OUTCOMES[o].icon}</span>
+                                        <span>{FOLLOWUP_OUTCOMES[o].label}</span>
+                                    </button>
+                                ))}
+                            </div>
+                            <textarea value={outcomeNote} onChange={(e) => setOutcomeNote(e.target.value)} rows={2} maxLength={500}
+                                placeholder="ملاحظة (اختياري) — ولو معرفتش توصله لازم تكتب ليه"
+                                className="w-full glass-input rounded-xl px-3 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none" />
+                            <button type="button" onClick={cancelFollowupContact} className="w-full text-sm font-bold text-white/60 py-2 rounded-xl border border-white/10">لسه ماعملتش (ماتحسبش)</button>
+                        </div>
+                    );
+                })()}
+            </Modal>
 
             <Modal isOpen={!!notesStudentId && !!loggedInAdmin} onClose={() => { setNotesStudentId(''); setNoteDraft(''); }}
                 title={`📝 ملاحظات: ${students.find(s => s.id === notesStudentId)?.name || ''}`}>
