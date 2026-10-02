@@ -11,7 +11,7 @@ import { doc, onSnapshot, setDoc, runTransaction, deleteField } from 'firebase/f
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.10.02.v36';
+const APP_VERSION = '2026.10.02.v37';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -3715,93 +3715,40 @@ const App = () => {
                                                     </div>
                                                 </div>
 
-                                                 {/* --- Badges and Achievements --- */}
-                                                 <div className="mt-4 pt-4 border-t border-indigo-805/30 animate-fade-in-out">
-                                                     <h4 className="text-sm font-semibold text-indigo-200 mb-3.5 flex items-center gap-2">
-                                                         <span className="text-sm leading-none">🎖️</span>
-                                                         <span>الأوسمة وإنجازات الشاب:</span>
-                                                     </h4>
-                                                     
-                                                     {/* --- Section 1: Monthly Badges --- */}
-                                                     <div className="mb-4 bg-indigo-950/30 p-3 rounded-xl border border-indigo-900/30">
-                                                         <h5 className="text-xs font-black text-amber-300 mb-2.5 flex items-center gap-1.5 opacity-95">
-                                                             <span>🕒</span>
-                                                             <span>أوسمة الشهر الحالي ({getMonthFormattedAr()}):</span>
-                                                         </h5>
-                                                         <div className="flex flex-wrap gap-2">
-                                                             {BADGES_CONFIG.filter(b => b.category === 'monthly').map(badge => {
-                                                                 const isUnlocked = badge.check(student.attendanceHistory, student.points, getCairoMonthPrefix());
-                                                                 const progress = badge.getProgress(student.attendanceHistory, student.points, getCairoMonthPrefix());
-                                                                 return (
-                                                                     <button
-                                                                         key={badge.id}
-                                                                         onClick={(e) => {
-                                                                             e.stopPropagation();
-                                                                             setSelectedBadgeDetail({
-                                                                                 ...badge,
-                                                                                 isUnlocked,
-                                                                                 progress
-                                                                             });
-                                                                         }}
-                                                                         className={`flex items-center gap-1.5 py-1 px-2.5 rounded-full text-xs font-bold transition-all cursor-pointer select-none border ${
-                                                                             isUnlocked 
-                                                                                 ? 'bg-amber-950/70 text-amber-300 border-amber-500/40 hover:bg-amber-900/60 hover:border-amber-400 hover:scale-[1.03]' 
-                                                                                 : 'bg-indigo-950/15 text-indigo-500/40 border-indigo-900/20 opacity-[0.55] hover:opacity-100 hover:text-indigo-400'
-                                                                         }`}
-                                                                     >
-                                                                         <span className="text-sm">{badge.emoji}</span>
-                                                                         <span>{badge.name}</span>
-                                                                         {isUnlocked ? (
-                                                                             <span className="text-[10px] text-green-400 font-extrabold font-mono">✓</span>
-                                                                         ) : (
-                                                                             <span className="text-[9px] text-indigo-400/50 font-mono">({progress})</span>
-                                                                         )}
-                                                                     </button>
-                                                                 );
-                                                             })}
+                                                 {/* --- الأوسمة: دواير صغيرة، ودوس على أي واحدة تشوف تفاصيلها --- */}
+                                                 {(() => {
+                                                     const monthly = BADGES_CONFIG.filter(b => b.category === 'monthly').map(badge => ({
+                                                         badge, isUnlocked: badge.check(student.attendanceHistory, student.points, getCairoMonthPrefix()),
+                                                         progress: badge.getProgress(student.attendanceHistory, student.points, getCairoMonthPrefix()),
+                                                     }));
+                                                     const cumulative = BADGES_CONFIG.filter(b => b.category === 'cumulative').map(badge => ({
+                                                         badge, isUnlocked: badge.check(student.attendanceHistory, student.points, undefined),
+                                                         progress: badge.getProgress(student.attendanceHistory, student.points, undefined),
+                                                     }));
+                                                     const dot = ({ badge, isUnlocked, progress }) => (
+                                                         <button key={badge.id} type="button" title={badge.name}
+                                                             onClick={(e) => { e.stopPropagation(); setSelectedBadgeDetail({ ...badge, isUnlocked, progress }); }}
+                                                             className={`relative w-10 h-10 rounded-full flex items-center justify-center text-lg border transition active:scale-90 ${isUnlocked ? 'bg-amber-400/20 border-amber-300/70 shadow-[0_0_10px_rgba(251,191,36,0.25)]' : 'bg-white/5 border-white/10 grayscale opacity-40'}`}>
+                                                             {badge.emoji}
+                                                             {isUnlocked && <span className="absolute -bottom-0.5 -left-0.5 w-4 h-4 rounded-full bg-emerald-500 text-[9px] text-white font-black flex items-center justify-center">✓</span>}
+                                                         </button>
+                                                     );
+                                                     const mDone = monthly.filter(x => x.isUnlocked).length;
+                                                     const cDone = cumulative.filter(x => x.isUnlocked).length;
+                                                     return (
+                                                         <div className="mt-4 pt-3 border-t border-indigo-800/50">
+                                                             <div className="flex items-center justify-between gap-2 mb-2">
+                                                                 <span className="text-sm font-bold text-indigo-200">🎖️ الأوسمة</span>
+                                                                 <span className="text-[11px] text-white/55">الشهر ده <b className={mDone === monthly.length ? 'text-amber-300' : 'text-white/80'}>{mDone}/{monthly.length}</b> • الألقاب <b className="text-white/80">{cDone}/{cumulative.length}</b></span>
+                                                             </div>
+                                                             <div className="flex flex-wrap items-center gap-1.5">
+                                                                 {monthly.map(dot)}
+                                                                 <span className="w-px h-7 bg-white/15 mx-1" />
+                                                                 {cumulative.map(dot)}
+                                                             </div>
                                                          </div>
-                                                     </div>
-
-                                                     {/* --- Section 2: Cumulative Badges --- */}
-                                                     <div className="bg-indigo-950/30 p-3 rounded-xl border border-indigo-900/30">
-                                                         <h5 className="text-xs font-black text-indigo-300 mb-2.5 flex items-center gap-1.5 opacity-95">
-                                                             <span>🏆</span>
-                                                             <span>ألقاب تراكمية وتحديات رقمية:</span>
-                                                         </h5>
-                                                         <div className="flex flex-wrap gap-2">
-                                                             {BADGES_CONFIG.filter(b => b.category === 'cumulative').map(badge => {
-                                                                 const isUnlocked = badge.check(student.attendanceHistory, student.points, undefined);
-                                                                 const progress = badge.getProgress(student.attendanceHistory, student.points, undefined);
-                                                                 return (
-                                                                     <button
-                                                                         key={badge.id}
-                                                                         onClick={(e) => {
-                                                                             e.stopPropagation();
-                                                                             setSelectedBadgeDetail({
-                                                                                 ...badge,
-                                                                                 isUnlocked,
-                                                                                 progress
-                                                                             });
-                                                                         }}
-                                                                         className={`flex items-center gap-1.5 py-1 px-2.5 rounded-full text-xs font-bold transition-all cursor-pointer select-none border ${
-                                                                             isUnlocked 
-                                                                                 ? 'bg-indigo-950/80 text-amber-300 border-amber-500/40 hover:bg-indigo-900 hover:border-amber-400 hover:scale-[1.03]' 
-                                                                                 : 'bg-indigo-950/15 text-indigo-500/40 border-indigo-900/20 opacity-[0.55] hover:opacity-100 hover:text-indigo-400'
-                                                                         }`}
-                                                                     >
-                                                                         <span className="text-sm">{badge.emoji}</span>
-                                                                         <span>{badge.name}</span>
-                                                                         {isUnlocked ? (
-                                                                             <span className="text-[10px] text-green-400 font-extrabold font-mono font-sans">✓</span>
-                                                                         ) : (
-                                                                             <span className="text-[9px] text-indigo-400/50 font-mono">({progress})</span>
-                                                                         )}
-                                                                     </button>
-                                                                 );
-                                                             })}
-                                                         </div>
-                                                     </div>
-                                                 </div>
+                                                     );
+                                                 })()}
 
                                                  {isAuthenticated && (
                                                     <div className="pt-4 border-t border-indigo-800/50">
