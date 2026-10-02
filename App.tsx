@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './index.css';
 import { db } from './firebase';
@@ -10,7 +11,7 @@ import { doc, onSnapshot, setDoc, runTransaction, deleteField } from 'firebase/f
 const generateId = () => `_${Math.random().toString(36).substring(2, 11)}`;
 
 const CAIRO_TIMEZONE = 'Africa/Cairo';
-const APP_VERSION = '2026.10.01.v34';
+const APP_VERSION = '2026.10.02.v36';
 
 const getCairoDateParts = (date = new Date()) => {
     const parts = new Intl.DateTimeFormat('en-US', {
@@ -841,83 +842,10 @@ const getFirstFridayOfFollowingMonth = (baseDate = new Date()) => {
 };
 
 const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = false, selectedDate, isSuperAdmin = false }) => {
-    const [participationPoints, setParticipationPoints] = useState('1');
+    // نوع النقط المتغيرة اللي الخادم بيضيفها (مشاركة / Games / ROOTS / خصم)
+    const [mode, setMode] = useState('participation');
+    const [amount, setAmount] = useState('1');
     const [participationDescription, setParticipationDescription] = useState('');
-    const [gamesStationPoints, setGamesStationPoints] = useState('1');
-    const [rootsPoints, setRootsPoints] = useState('1');
-    const [exchangePoints, setExchangePoints] = useState('5');
-
-    const decrementExchange = () => {
-        setExchangePoints((prev) => {
-            let num = parseInt(prev, 10);
-            if (isNaN(num)) num = 5;
-            const newVal = Math.max(1, num - 1);
-            return String(newVal);
-        });
-    };
-
-    const incrementExchange = () => {
-        setExchangePoints((prev) => {
-            let num = parseInt(prev, 10);
-            if (isNaN(num)) num = 5;
-            const newVal = Math.min(3000, num + 1);
-            return String(newVal);
-        });
-    };
-
-    const decrementParticipation = () => {
-        setParticipationPoints((prev) => {
-            let num = parseInt(prev, 10);
-            if (isNaN(num)) num = 1;
-            const newVal = Math.max(-10, num - 1);
-            return String(newVal);
-        });
-    };
-
-    const incrementParticipation = () => {
-        setParticipationPoints((prev) => {
-            let num = parseInt(prev, 10);
-            if (isNaN(num)) num = 1;
-            const newVal = Math.min(50, num + 1);
-            return String(newVal);
-        });
-    };
-
-    const decrementGamesStation = () => {
-        setGamesStationPoints((prev) => {
-            let num = parseInt(prev, 10);
-            if (isNaN(num)) num = 1;
-            const newVal = Math.max(-50, num - 1);
-            return String(newVal);
-        });
-    };
-
-    const incrementGamesStation = () => {
-        setGamesStationPoints((prev) => {
-            let num = parseInt(prev, 10);
-            if (isNaN(num)) num = 1;
-            const newVal = Math.min(100, num + 1);
-            return String(newVal);
-        });
-    };
-
-    const decrementRoots = () => {
-        setRootsPoints((prev) => {
-            let num = parseInt(prev, 10);
-            if (isNaN(num)) num = 1;
-            const newVal = Math.max(-50, num - 1);
-            return String(newVal);
-        });
-    };
-
-    const incrementRoots = () => {
-        setRootsPoints((prev) => {
-            let num = parseInt(prev, 10);
-            if (isNaN(num)) num = 1;
-            const newVal = Math.min(100, num + 1);
-            return String(newVal);
-        });
-    };
 
     const rules = useMemo(() => {
         if (!student) return {};
@@ -966,8 +894,35 @@ const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = 
             onActionAfterAdd();
         }
     };
-    
+
     if (!student) return null;
+
+    const MODES = {
+        participation: { label: 'مشاركة', emoji: '✨', min: -10, max: 50, def: 1, enabled: rules.canAddParticipation, tone: 'from-amber-500 to-orange-600', ring: 'border-amber-400 text-amber-200 bg-amber-500/20' },
+        gamesStation: { label: 'Games', emoji: '🎮', min: -50, max: 100, def: 1, enabled: rules.canAddGamesStation, tone: 'from-fuchsia-500 to-pink-600', ring: 'border-fuchsia-400 text-fuchsia-200 bg-fuchsia-500/20' },
+        roots: { label: 'ROOTS', emoji: '🌱', min: -50, max: 100, def: 1, enabled: rules.canAddRoots, tone: 'from-emerald-500 to-teal-600', ring: 'border-emerald-400 text-emerald-200 bg-emerald-500/20' },
+        exchange: { label: 'خصم', emoji: '🔄', min: 1, max: 3000, def: 5, enabled: true, tone: 'from-rose-600 to-red-700', ring: 'border-rose-400 text-rose-200 bg-rose-500/20' },
+    };
+    const cfg = MODES[mode];
+    const clamp = (n) => Math.max(cfg.min, Math.min(cfg.max, n));
+    const num = parseInt(amount, 10);
+    const amountOk = !isNaN(num) && amount !== '-' && num !== 0 && num >= cfg.min && num <= cfg.max;
+    const pickMode = (m) => { setMode(m); setAmount(String(MODES[m].def)); };
+    const step = (d) => setAmount(prev => { const n = parseInt(prev, 10); return String(clamp((isNaN(n) ? cfg.def : n) + d)); });
+    const submitAmount = () => {
+        if (!amountOk || !cfg.enabled) return;
+        if (mode === 'exchange') handleAddPoints('exchange', -Math.abs(num));
+        else if (mode === 'participation') { handleAddPoints('participation', num, participationDescription); setParticipationDescription(''); }
+        else handleAddPoints(mode, num);
+        setAmount(String(cfg.def));
+    };
+
+    const quick = [
+        { type: 'monthlyMass', pts: 25, label: 'قداس شهري', emoji: '⛪', ok: rules.canAddMass, tone: 'bg-purple-600' },
+        { type: 'early', pts: 10, label: 'حضور مبكر', emoji: '⏰', ok: rules.canAddEarly, tone: 'bg-green-600' },
+        { type: 'late', pts: 5, label: 'حضور متأخر', emoji: '🚶', ok: rules.canAddLate, tone: 'bg-yellow-600' },
+        { type: 'confession', pts: 15, label: 'اعتراف', emoji: '🙏', ok: rules.canAddConfession, tone: 'bg-rose-600' },
+    ];
 
     return (
         <div className="space-y-3">
@@ -976,327 +931,48 @@ const PointActions = ({ student, addPoints, onActionAfterAdd = null, fromScan = 
                     {rules.windowMessage}
                 </div>
             )}
-            <button
-                onClick={() => handleAddPoints('monthlyMass', 25)}
-                disabled={!rules.canAddMass}
-                className="w-full p-3 text-white font-bold rounded-lg transition-colors bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
-            >
-                قداس شهري (+25 نقطة)
-            </button>
-            <button
-                onClick={() => handleAddPoints('early', 10)}
-                disabled={!rules.canAddEarly}
-                className="w-full p-3 text-white font-bold rounded-lg transition-colors bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
-            >
-                حضور مبكر (+10 نقاط)
-            </button>
-            <button
-                onClick={() => handleAddPoints('late', 5)}
-                disabled={!rules.canAddLate}
-                className="w-full p-3 text-white font-bold rounded-lg transition-colors bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
-            >
-                حضور متأخر (+5 نقاط)
-            </button>
-             <button
-                onClick={() => handleAddPoints('confession', 15)}
-                disabled={!rules.canAddConfession}
-                className="w-full p-3 text-white font-bold rounded-lg transition-colors bg-rose-600 hover:bg-rose-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
-            >
-                اعتراف (+15 نقطة)
-            </button>
 
-            <div className="!mt-4 pt-4 border-t border-indigo-900/60 space-y-2.5">
-                <label className="text-xs font-black uppercase tracking-wider text-fuchsia-400 flex items-center gap-1.5 mb-1 select-none">
-                    <span className="text-base">🎮</span>
-                    <span>نقاط Games Station</span>
-                </label>
-                <div className="flex items-stretch gap-2.5">
-                    <div className="flex items-center bg-slate-900/60 border border-fuchsia-500/40 rounded-xl overflow-hidden shadow-inner shadow-fuchsia-950/20">
-                        <button
-                            type="button"
-                            onClick={decrementGamesStation}
-                            disabled={!rules.canAddGamesStation}
-                            className="px-3.5 py-2 bg-fuchsia-950/30 hover:bg-fuchsia-900/50 text-fuchsia-400 font-black hover:text-fuchsia-300 transition-colors select-none disabled:opacity-30 disabled:text-gray-500 disabled:bg-transparent text-lg leading-none border-r border-fuchsia-500/10 focus:outline-none"
-                        >
-                            -
-                        </button>
-                        <input
-                            type="number"
-                            id={`games-station-points-${student.id}`}
-                            min="-50"
-                            max="100"
-                            value={gamesStationPoints}
-                            onChange={(e) => {
-                                const value = e.target.value;
-                                if (/^-?[0-9]*$/.test(value)) {
-                                    const num = parseInt(value, 10);
-                                    if ((!isNaN(num) && num >= -50 && num <= 100) || value === '' || value === '-') {
-                                        setGamesStationPoints(value);
-                                    } else if (value.length > 0) {
-                                        const clamped = Math.max(-50, Math.min(100, num));
-                                        setGamesStationPoints(String(clamped));
-                                    }
-                                }
-                            }}
-                            onBlur={() => {
-                                const num = parseInt(gamesStationPoints, 10);
-                                if (isNaN(num) || gamesStationPoints === '' || gamesStationPoints === '-') {
-                                    setGamesStationPoints('1');
-                                } else {
-                                    const clamped = Math.max(-50, Math.min(100, num));
-                                    setGamesStationPoints(String(clamped));
-                                }
-                            }}
-                            className="w-14 bg-transparent border-0 text-fuchsia-100 text-center focus:outline-none focus:ring-0 text-sm font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none px-1"
-                            disabled={!rules.canAddGamesStation}
-                        />
-                        <button
-                            type="button"
-                            onClick={incrementGamesStation}
-                            disabled={!rules.canAddGamesStation}
-                            className="px-3.5 py-2 bg-fuchsia-950/30 hover:bg-fuchsia-900/50 text-fuchsia-400 font-black hover:text-fuchsia-300 transition-colors select-none disabled:opacity-30 disabled:text-gray-500 disabled:bg-transparent text-lg leading-none border-l border-fuchsia-500/10 focus:outline-none"
-                        >
-                            +
-                        </button>
-                    </div>
-                    <button
-                        onClick={() => {
-                            const points = parseInt(gamesStationPoints, 10);
-                            if (!isNaN(points)) {
-                                handleAddPoints('gamesStation', points);
-                                setGamesStationPoints('1');
-                            }
-                        }}
-                        disabled={!rules.canAddGamesStation || isNaN(parseInt(gamesStationPoints, 10)) || gamesStationPoints === '' || gamesStationPoints === '-'}
-                        className="flex-grow rounded-xl bg-gradient-to-r from-fuchsia-500 to-pink-600 px-4 py-2.5 text-xs md:text-sm font-black text-white shadow-lg shadow-pink-900/20 hover:from-fuchsia-400 hover:to-pink-500 active:scale-[0.98] transition-all disabled:from-indigo-950 disabled:to-indigo-950 disabled:text-indigo-700/60 disabled:cursor-not-allowed disabled:shadow-none disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-1.5"
-                    >
-                        <span>🎮</span>
-                        <span>إضافة نقاط الـ Games</span>
+            {/* الحضور والاعتراف: زرار واحد لكل نوع */}
+            <div className="grid grid-cols-2 gap-2">
+                {quick.map(q => (
+                    <button key={q.type} type="button" onClick={() => handleAddPoints(q.type, q.pts)} disabled={!q.ok}
+                        className={`flex items-center justify-between gap-1 rounded-xl px-3 py-2.5 text-white font-bold text-sm transition active:scale-[0.97] ${q.ok ? q.tone : 'bg-white/5 text-white/30 cursor-not-allowed'}`}>
+                        <span className="truncate">{q.emoji} {q.label}</span>
+                        <span className={`shrink-0 text-xs font-black rounded-full px-1.5 ${q.ok ? 'bg-black/20' : ''}`}>+{q.pts}</span>
                     </button>
-                </div>
+                ))}
             </div>
 
-            <div className="!mt-4 pt-4 border-t border-indigo-900/60 space-y-2.5">
-                <label className="text-xs font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5 mb-1 select-none">
-                    <span className="text-base">🌱</span>
-                    <span>نقاط ROOTS</span>
-                </label>
-                <div className="flex items-stretch gap-2.5">
-                    <div className="flex items-center bg-slate-900/60 border border-emerald-500/40 rounded-xl overflow-hidden shadow-inner shadow-emerald-950/20">
-                        <button
-                            type="button"
-                            onClick={decrementRoots}
-                            disabled={!rules.canAddRoots}
-                            className="px-3.5 py-2 bg-emerald-950/30 hover:bg-emerald-900/50 text-emerald-400 font-black hover:text-emerald-300 transition-colors select-none disabled:opacity-30 disabled:text-gray-500 disabled:bg-transparent text-lg leading-none border-r border-emerald-500/10 focus:outline-none"
-                        >
-                            -
+            {/* النقط المتغيرة: اختار النوع، حدّد العدد، وضيف */}
+            <div className="rounded-2xl border border-white/12 bg-white/5 p-2.5 space-y-2.5">
+                <div className="grid grid-cols-4 gap-1">
+                    {Object.entries(MODES).map(([key, m]: [string, any]) => (
+                        <button key={key} type="button" onClick={() => pickMode(key)}
+                            className={`rounded-lg border py-1.5 text-[11px] font-black transition ${mode === key ? m.ring : 'border-transparent text-white/55'} ${!m.enabled ? 'opacity-40' : ''}`}>
+                            <div className="text-base leading-5">{m.emoji}</div>{m.label}
                         </button>
-                        <input
-                            type="number"
-                            id={`roots-points-${student.id}`}
-                            min="-50"
-                            max="100"
-                            value={rootsPoints}
-                            onChange={(e) => {
-                                const value = e.target.value;
-                                if (/^-?[0-9]*$/.test(value)) {
-                                    const num = parseInt(value, 10);
-                                    if ((!isNaN(num) && num >= -50 && num <= 100) || value === '' || value === '-') {
-                                        setRootsPoints(value);
-                                    } else if (value.length > 0) {
-                                        const clamped = Math.max(-50, Math.min(100, num));
-                                        setRootsPoints(String(clamped));
-                                    }
-                                }
-                            }}
-                            onBlur={() => {
-                                const num = parseInt(rootsPoints, 10);
-                                if (isNaN(num) || rootsPoints === '' || rootsPoints === '-') {
-                                    setRootsPoints('1');
-                                } else {
-                                    const clamped = Math.max(-50, Math.min(100, num));
-                                    setRootsPoints(String(clamped));
-                                }
-                            }}
-                            className="w-14 bg-transparent border-0 text-emerald-100 text-center focus:outline-none focus:ring-0 text-sm font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none px-1"
-                            disabled={!rules.canAddRoots}
-                        />
-                        <button
-                            type="button"
-                            onClick={incrementRoots}
-                            disabled={!rules.canAddRoots}
-                            className="px-3.5 py-2 bg-emerald-950/30 hover:bg-emerald-900/50 text-emerald-400 font-black hover:text-emerald-300 transition-colors select-none disabled:opacity-30 disabled:text-gray-500 disabled:bg-transparent text-lg leading-none border-l border-emerald-500/10 focus:outline-none"
-                        >
-                            +
-                        </button>
+                    ))}
+                </div>
+                <div className="flex items-stretch gap-2">
+                    <div className="flex items-center rounded-xl border border-white/15 bg-black/20 overflow-hidden">
+                        <button type="button" onClick={() => step(-1)} disabled={!cfg.enabled} className="px-3 py-2 text-lg font-black text-white/80 disabled:opacity-30">−</button>
+                        <input type="text" inputMode="numeric" value={amount} disabled={!cfg.enabled}
+                            onChange={(e) => { const v = e.target.value; if (/^-?[0-9]*$/.test(v)) setAmount(v); }}
+                            onBlur={() => { const n = parseInt(amount, 10); setAmount(isNaN(n) ? String(cfg.def) : String(clamp(n))); }}
+                            className="w-12 bg-transparent text-center text-white font-black focus:outline-none disabled:opacity-40" />
+                        <button type="button" onClick={() => step(1)} disabled={!cfg.enabled} className="px-3 py-2 text-lg font-black text-white/80 disabled:opacity-30">+</button>
                     </div>
-                    <button
-                        onClick={() => {
-                            const points = parseInt(rootsPoints, 10);
-                            if (!isNaN(points)) {
-                                handleAddPoints('roots', points);
-                                setRootsPoints('1');
-                            }
-                        }}
-                        disabled={!rules.canAddRoots || isNaN(parseInt(rootsPoints, 10)) || rootsPoints === '' || rootsPoints === '-'}
-                        className="flex-grow rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-2.5 text-xs md:text-sm font-black text-white shadow-lg shadow-emerald-900/20 hover:from-emerald-400 hover:to-teal-500 active:scale-[0.98] transition-all disabled:from-indigo-950 disabled:to-indigo-950 disabled:text-indigo-700/60 disabled:cursor-not-allowed disabled:shadow-none disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-1.5"
-                    >
-                        <span>🌱</span>
-                        <span>إضافة نقاط الـ ROOTS</span>
+                    <button type="button" onClick={submitAmount} disabled={!cfg.enabled || !amountOk}
+                        className={`flex-1 rounded-xl bg-gradient-to-r ${cfg.tone} px-3 text-sm font-black text-white transition active:scale-[0.98] disabled:opacity-35 disabled:cursor-not-allowed`}>
+                        {mode === 'exchange' ? `خصم ${amountOk ? Math.abs(num) : 0} نقطة` : `ضيف ${amountOk ? (num > 0 ? `+${num}` : num) : 0} ${cfg.label}`}
                     </button>
                 </div>
-            </div>
-            
-            <div className="!mt-4 pt-4 border-t border-indigo-900/60 space-y-2.5">
-                <label className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5 mb-1 select-none">
-                    <span className="text-base">✨</span>
-                    <span>نقاط المشاركة</span>
-                </label>
-                <div className="flex items-stretch gap-2.5">
-                    <div className="flex items-center bg-slate-900/60 border border-amber-500/40 rounded-xl overflow-hidden shadow-inner shadow-amber-950/20">
-                        <button
-                            type="button"
-                            onClick={decrementParticipation}
-                            disabled={!rules.canAddParticipation}
-                            className="px-3.5 py-2 bg-amber-950/30 hover:bg-amber-900/50 text-amber-400 font-black hover:text-amber-300 transition-colors select-none disabled:opacity-30 disabled:text-gray-500 disabled:bg-transparent text-lg leading-none border-r border-amber-500/10 focus:outline-none"
-                        >
-                            -
-                        </button>
-                        <input
-                            type="number"
-                            id={`participation-points-${student.id}`}
-                            min="-10"
-                            max="50"
-                            value={participationPoints}
-                            onChange={(e) => {
-                                const value = e.target.value;
-                                if (/^-?[0-9]*$/.test(value)) {
-                                    const num = parseInt(value, 10);
-                                    if ((!isNaN(num) && num >= -10 && num <= 50) || value === '' || value === '-') {
-                                        setParticipationPoints(value);
-                                    } else if (value.length > 0) {
-                                        const clamped = Math.max(-10, Math.min(50, num));
-                                        setParticipationPoints(String(clamped));
-                                    }
-                                }
-                            }}
-                            onBlur={() => {
-                                const num = parseInt(participationPoints, 10);
-                                if (isNaN(num) || participationPoints === '' || participationPoints === '-') {
-                                    setParticipationPoints('1');
-                                } else {
-                                    const clamped = Math.max(-10, Math.min(50, num));
-                                    setParticipationPoints(String(clamped));
-                                }
-                            }}
-                            className="w-14 bg-transparent border-0 text-amber-100 text-center focus:outline-none focus:ring-0 text-sm font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none px-1"
-                            disabled={!rules.canAddParticipation}
-                        />
-                        <button
-                            type="button"
-                            onClick={incrementParticipation}
-                            disabled={!rules.canAddParticipation}
-                            className="px-3.5 py-2 bg-amber-950/30 hover:bg-amber-900/50 text-amber-400 font-black hover:text-amber-300 transition-colors select-none disabled:opacity-30 disabled:text-gray-500 disabled:bg-transparent text-lg leading-none border-l border-amber-500/10 focus:outline-none"
-                        >
-                            +
-                        </button>
-                    </div>
-                    <button
-                        onClick={() => {
-                            const points = parseInt(participationPoints, 10);
-                            if (!isNaN(points)) {
-                                handleAddPoints('participation', points, participationDescription);
-                                setParticipationDescription('');
-                                setParticipationPoints('1');
-                            }
-                        }}
-                        disabled={!rules.canAddParticipation || isNaN(parseInt(participationPoints, 10)) || participationPoints === '' || participationPoints === '-'}
-                        className="flex-grow rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-4 py-2.5 text-xs md:text-sm font-black text-white shadow-lg shadow-amber-900/20 hover:from-amber-400 hover:to-orange-500 active:scale-[0.98] transition-all disabled:from-indigo-950 disabled:to-indigo-950 disabled:text-indigo-700/60 disabled:cursor-not-allowed disabled:shadow-none disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-1.5"
-                    >
-                        <span>✨</span>
-                        <span>إضافة نقاط المشاركة</span>
-                    </button>
-                </div>
-                <input
-                    type="text"
-                    placeholder="سبب المشاركة (اختياري)"
-                    value={participationDescription}
-                    onChange={(e) => setParticipationDescription(e.target.value)}
-                    className="w-full rounded-xl border border-indigo-900/50 bg-slate-900/40 text-white placeholder-indigo-400/50 focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 focus:outline-none px-3.5 py-2 text-xs md:text-sm transition-all"
-                    disabled={!rules.canAddParticipation}
-                />
-            </div>
-            
-            {/* Exchange / Redeem Points Section (Negative points only) */}
-            <div className="!mt-4 pt-4 border-t border-indigo-900/60 space-y-2.5">
-                <label className="text-xs font-black uppercase tracking-wider text-rose-400 flex items-center gap-1.5 mb-1 select-none">
-                    <span className="text-base">🔄</span>
-                    <span>تبديل النقاط (خصم بالسالب)</span>
-                </label>
-                <div className="flex items-stretch gap-2.5">
-                    <div className="flex items-center bg-slate-900/60 border border-rose-500/40 rounded-xl overflow-hidden shadow-inner shadow-rose-950/20">
-                        <button
-                            type="button"
-                            onClick={decrementExchange}
-                            className="px-3.5 py-2 bg-rose-950/30 hover:bg-rose-900/50 text-rose-400 font-black hover:text-rose-300 transition-colors select-none text-lg leading-none border-r border-rose-500/10 focus:outline-none"
-                        >
-                            -
-                        </button>
-                        <input
-                            type="number"
-                            id={`exchange-points-${student.id}`}
-                            min="1"
-                            max="3000"
-                            value={exchangePoints}
-                            onChange={(e) => {
-                                const value = e.target.value;
-                                if (/^[0-9]*$/.test(value)) {
-                                    const num = parseInt(value, 10);
-                                    if (!isNaN(num) && num >= 1 && num <= 3000) {
-                                        setExchangePoints(value);
-                                    } else if (value === '') {
-                                        setExchangePoints('');
-                                    } else {
-                                        const clamped = Math.max(1, Math.min(3000, num));
-                                        setExchangePoints(String(clamped));
-                                    }
-                                }
-                            }}
-                            onBlur={() => {
-                                const num = parseInt(exchangePoints, 10);
-                                if (isNaN(num) || exchangePoints === '') {
-                                    setExchangePoints('5');
-                                } else {
-                                    const clamped = Math.max(1, Math.min(3000, num));
-                                    setExchangePoints(String(clamped));
-                                }
-                            }}
-                            className="w-20 bg-transparent border-0 text-rose-100 text-center focus:outline-none focus:ring-0 text-sm font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none px-1"
-                        />
-                        <button
-                            type="button"
-                            onClick={incrementExchange}
-                            className="px-3.5 py-2 bg-rose-950/30 hover:bg-rose-900/50 text-rose-400 font-black hover:text-rose-300 transition-colors select-none text-lg leading-none border-l border-rose-500/10 focus:outline-none"
-                        >
-                            +
-                        </button>
-                    </div>
-                    <button
-                        onClick={() => {
-                            const rawPts = parseInt(exchangePoints, 10);
-                            if (!isNaN(rawPts) && rawPts > 0) {
-                                const minusPoints = -Math.abs(rawPts);
-                                handleAddPoints('exchange', minusPoints);
-                                setExchangePoints('5');
-                            }
-                        }}
-                        disabled={isNaN(parseInt(exchangePoints, 10)) || parseInt(exchangePoints, 10) <= 0}
-                        className="flex-grow rounded-xl bg-gradient-to-r from-rose-600 to-red-700 px-4 py-2.5 text-xs md:text-sm font-black text-white shadow-lg shadow-rose-900/20 hover:from-rose-500 hover:to-red-600 active:scale-[0.98] transition-all disabled:from-indigo-950 disabled:to-indigo-950 disabled:text-indigo-700/60 disabled:cursor-not-allowed disabled:shadow-none disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-1.5"
-                    >
-                        <span>🔄</span>
-                        <span>خصم / تبديل النقاط ({!isNaN(parseInt(exchangePoints, 10)) && parseInt(exchangePoints, 10) > 0 ? `-${Math.abs(parseInt(exchangePoints, 10))}` : '0'})</span>
-                    </button>
-                </div>
+                {mode === 'participation' && (
+                    <input type="text" placeholder="سبب المشاركة (اختياري)" value={participationDescription}
+                        onChange={(e) => setParticipationDescription(e.target.value)} disabled={!cfg.enabled}
+                        className="w-full rounded-xl border border-white/12 bg-black/20 text-white placeholder-white/35 focus:outline-none focus:border-amber-400 px-3 py-2 text-xs" />
+                )}
+                {!cfg.enabled && <p className="text-[11px] text-white/45 text-center">{mode === 'participation' ? 'المشاركة متاحة يوم الاجتماع بس.' : `${cfg.label} اتضافت النهارده خلاص، أو مش يوم اجتماع.`}</p>}
             </div>
         </div>
     );
@@ -1680,6 +1356,12 @@ const App = () => {
     // الملاحظات (متخزنة في appData/notes_v1)
     const [notesData, setNotesData] = useState<Record<string, Record<string, any>>>({});
     const [notesStudentId, setNotesStudentId] = useState('');
+    // سجل الافتقاد لكل اجتماع (علشان التقرير الشهري) — appData/followup_history_v1
+    const [followupHistory, setFollowupHistory] = useState<Record<string, Record<string, any>>>({});
+    const [fridayMeetingDate, setFridayMeetingDate] = useState('');
+    const [atRiskOpen, setAtRiskOpen] = useState(true);
+    const [monthReportOpen, setMonthReportOpen] = useState(false);
+    const [monthReportPrefix, setMonthReportPrefix] = useState('');
     const [noteDraft, setNoteDraft] = useState('');
     const [followupGrade, setFollowupGrade] = useState('أولى ثانوي');
     const [followupAssignPickerOpen, setFollowupAssignPickerOpen] = useState(false);
@@ -2802,7 +2484,7 @@ const App = () => {
                     progress: '3/3 أوسمة مكتملة',
                     isAwarded: !!currentMonthAwardRecord,
                     awardedRecord: currentMonthAwardRecord,
-                    suggestedPoints: 10,
+                    suggestedPoints: 15,
                     color: 'from-amber-400 to-yellow-500'
                 });
             }
@@ -2831,7 +2513,7 @@ const App = () => {
                     progress: '3/3 أوسمة مكتملة',
                     isAwarded: !!prevMonthAwardRecord,
                     awardedRecord: prevMonthAwardRecord,
-                    suggestedPoints: 10,
+                    suggestedPoints: 15,
                     color: 'from-yellow-500 to-amber-600'
                 });
             }
@@ -2865,35 +2547,7 @@ const App = () => {
                 }
             });
 
-            // 4. Single Monthly Badges for Current Month (أوسمة شهرية مفردة)
-            BADGES_CONFIG.filter(b => b.category === 'monthly').forEach(badge => {
-                const isUnlocked = badge.check(history, pts, currentMonthPrefix);
-                if (isUnlocked) {
-                    const singleAwardRecord = history.find(h =>
-                        (h.meta && h.meta.includes(`badge_reward_${badge.id}_${currentMonthPrefix}`)) ||
-                        (h.description && h.description.includes(badge.name) && h.date && h.date.startsWith(currentMonthPrefix))
-                    );
-                    alerts.push({
-                        id: `monthly_single_${badge.id}_${currentMonthPrefix}_${student.id}`,
-                        studentId: student.id,
-                        studentName: student.name,
-                        student,
-                        badgeId: badge.id,
-                        badgeTitle: `وسام: ${badge.name}`,
-                        badgeEmoji: badge.emoji,
-                        category: 'monthly_single',
-                        categoryLabel: 'وسام شهري مفرد',
-                        periodLabel: getArabicMonthName(currentMonthPrefix),
-                        monthPrefix: currentMonthPrefix,
-                        description: badge.description,
-                        progress: badge.getProgress(history, pts, currentMonthPrefix),
-                        isAwarded: !!singleAwardRecord,
-                        awardedRecord: singleAwardRecord,
-                        suggestedPoints: 10,
-                        color: badge.color
-                    });
-                }
-            });
+            // (الأوسمة الشهرية لوحدها مالهاش مكافأة: المكافأة بس للي يكمّل الـ3 أوسمة = 15 نقطة)
         });
 
         // 3. مكافآت ترتيب الشهر اللي فات (أول 3): بتتحسب مرة واحدة بس للكل.
@@ -3103,6 +2757,14 @@ const App = () => {
         }, (err) => console.error('Follow-up listener error:', err));
         return () => unsub();
     }, []);
+    const FOLLOWUP_HISTORY_REF = () => doc(db, 'appData', 'followup_history_v1');
+    useEffect(() => {
+        const unsub = onSnapshot(FOLLOWUP_HISTORY_REF(), (snap) => {
+            const data: any = snap.exists() ? snap.data() : {};
+            setFollowupHistory((data && typeof data.byMeeting === 'object' && data.byMeeting) || {});
+        }, (err) => console.error('Follow-up history listener error:', err));
+        return () => unsub();
+    }, []);
 
     // الاجتماعات اللي حصلت فعلًا (أي جمعة اتسجل فيها حضور)، من الأحدث للأقدم
     const followupMeetings = useMemo(() => {
@@ -3214,18 +2876,138 @@ const App = () => {
     };
     const notesDocKB = useMemo(() => Math.round(JSON.stringify(notesData || {}).length / 1024), [notesData]);
 
+    // ===== ولاد بيبعدوا: غايبين 3 اجتماعات ورا بعض أو أكتر، وكانوا بيحضروا قبل كده =====
+    const AT_RISK_STREAK = 3;
+    const atRiskStudents = useMemo(() => students
+        .filter(s => (followupInfo[s.id]?.streak || 0) >= AT_RISK_STREAK && followupInfo[s.id]?.lastAttendedDate)
+        .sort((a, b) => (followupInfo[b.id]?.streak || 0) - (followupInfo[a.id]?.streak || 0) || String(a.name).localeCompare(String(b.name), 'ar')),
+        [students, followupInfo]);
+    const neverCameStudents = useMemo(() => followupMeetings.length >= AT_RISK_STREAK
+        ? students.filter(s => !followupInfo[s.id]?.lastAttendedDate) : [], [students, followupInfo, followupMeetings]);
+    const isAtRisk = (studentId) => (followupInfo[studentId]?.streak || 0) >= AT_RISK_STREAK && !!followupInfo[studentId]?.lastAttendedDate;
+
+    // نقط النشاط لكل ولد في يوم أو شهر معيّن (من غير المكافآت والهدايا)
+    const activityPointsIn = (s, prefix) => (s.attendanceHistory || [])
+        .filter(h => h.date && h.date.startsWith(prefix) && isActivityRecord(h))
+        .reduce((n, h) => n + Number(h.points || 0), 0);
+    const firstAttendanceDate = (s) => (s.attendanceHistory || [])
+        .filter(h => ['early', 'late', 'monthlyMass'].includes(h.type) && h.date).map(h => h.date).sort()[0] || '';
+
+    // ===== ملخص الجمعة =====
+    const buildFridaySummary = (meetingDate, inScope) => {
+        const idx = followupMeetings.findIndex(m => m.date === meetingDate);
+        if (idx === -1) return null;
+        const m = followupMeetings[idx];
+        const prev = followupMeetings[idx + 1];
+        const scoped = students.filter(inScope);
+        const present = scoped.filter(s => m.attendees.has(s.id));
+        const prevCount = prev ? scoped.filter(s => prev.attendees.has(s.id)).length : null;
+        const byGrade = followupGrades.map(g => ({ g, n: present.filter(s => String(s.grade || '').trim() === g).length, total: scoped.filter(s => String(s.grade || '').trim() === g).length })).filter(x => x.total > 0);
+        const newKids = present.filter(s => firstAttendanceDate(s) === meetingDate);
+        const returned = present.filter(s => {
+            if (newKids.includes(s)) return false;
+            let missed = 0;
+            for (let i = idx + 1; i < followupMeetings.length; i++) { if (followupMeetings[i].attendees.has(s.id)) break; missed++; }
+            return missed >= 2;
+        });
+        const top = present.map(s => ({ s, p: activityPointsIn(s, meetingDate) })).filter(x => x.p > 0).sort((a, b) => b.p - a.p).slice(0, 3);
+        // الافتقاد اللي اتعمل على غياب الاجتماع اللي قبله
+        let fuDone = 0, fuTotal = 0;
+        if (prev) {
+            scoped.filter(s => !prev.attendees.has(s.id) && assignedServantId(s.id)).forEach(s => {
+                fuTotal++;
+                if (wasContactedForMeeting(prev.date, s.id)) fuDone++;
+            });
+        }
+        const atRiskN = idx === 0 ? atRiskStudents.filter(inScope).length : null;
+        return { m, prev, present, prevCount, byGrade, newKids, returned, top, fuDone, fuTotal, atRiskN, isMass: isFirstFridayDateKey(meetingDate) };
+    };
+    const fridaySummaryText = (sum, scopeLabel) => {
+        if (!sum) return '';
+        const d = formatCairoDateKeyAr(sum.m.date, { weekday: 'long', day: 'numeric', month: 'long' });
+        const diff = sum.prevCount === null ? '' : sum.present.length - sum.prevCount;
+        const lines = [
+            `📋 ملخص ${sum.isMass ? 'القداس الشهري' : 'اجتماع'} ${d}${scopeLabel ? ` — ${scopeLabel}` : ''}`,
+            `اجتماع الأنبا رويس - ثانوي بنين`,
+            ``,
+            `👥 الحضور: ${sum.present.length}${diff === '' ? '' : diff > 0 ? ` (⬆️ ${diff} عن اللي قبله)` : diff < 0 ? ` (⬇️ ${Math.abs(Number(diff))} عن اللي قبله)` : ' (زي اللي قبله)'}`,
+            ...(sum.byGrade.length > 1 ? [sum.byGrade.map(x => `• ${x.g}: ${x.n} من ${x.total}`).join('\n')] : []),
+            ...(sum.newKids.length ? [``, `🆕 أول مرة ييجوا (${sum.newKids.length}): ${sum.newKids.map(s => s.name).join('، ')}`] : []),
+            ...(sum.returned.length ? [``, `🔙 رجعوا بعد غياب (${sum.returned.length}): ${sum.returned.map(s => s.name).join('، ')}`] : []),
+            ...(sum.top.length ? [``, `🏆 أعلى نقط: ${sum.top.map(x => `${x.s.name} (${x.p})`).join('، ')}`] : []),
+            ...(sum.prev && sum.fuTotal ? [``, `📞 افتقاد غياب الاجتماع اللي قبله: ${sum.fuDone} من ${sum.fuTotal}`] : []),
+            ...(sum.atRiskN ? [`⚠️ ولاد غايبين ${AT_RISK_STREAK} اجتماعات أو أكتر: ${sum.atRiskN}`] : []),
+        ];
+        return lines.join('\n');
+    };
+
+    // ===== التقرير الشهري =====
+    const reportMonths = useMemo(() => [...new Set(followupMeetings.map(m => m.date.slice(0, 7)))].sort().reverse(), [followupMeetings]);
+    const buildMonthReport = (prefix, inScope) => {
+        const scoped = students.filter(inScope);
+        const meetings = followupMeetings.filter(m => m.date.startsWith(prefix)).slice().reverse();
+        const attendedCount = (s) => meetings.filter(m => m.attendees.has(s.id)).length;
+        const perMeeting = meetings.map(m => ({
+            date: m.date,
+            isMass: isFirstFridayDateKey(m.date),
+            total: scoped.filter(s => m.attendees.has(s.id)).length,
+            byGrade: followupGrades.map(g => scoped.filter(s => String(s.grade || '').trim() === g && m.attendees.has(s.id)).length),
+        }));
+        const grades = followupGrades.map(g => {
+            const kids = scoped.filter(s => String(s.grade || '').trim() === g);
+            const avg = meetings.length ? kids.reduce((n, s) => n + attendedCount(s), 0) / meetings.length : 0;
+            return { g, total: kids.length, avg, pct: kids.length ? Math.round((avg / kids.length) * 100) : 0 };
+        }).filter(x => x.total > 0);
+        const totalAvg = meetings.length ? scoped.reduce((n, s) => n + attendedCount(s), 0) / meetings.length : 0;
+        const massKids = scoped.filter(s => (s.attendanceHistory || []).some(h => h.type === 'monthlyMass' && h.date && h.date.startsWith(prefix)));
+        const confessions = scoped.filter(s => (s.attendanceHistory || []).some(h => h.type === 'confession' && h.date && h.date.startsWith(prefix))).length;
+        const newKids = scoped.filter(s => firstAttendanceDate(s).startsWith(prefix));
+        const committed = scoped.map(s => ({ s, n: attendedCount(s), p: activityPointsIn(s, prefix) }))
+            .filter(x => x.n > 0).sort((a, b) => b.n - a.n || b.p - a.p).slice(0, 10);
+        const servants = admins.map(a => {
+            const group = scoped.filter(s => assignedServantId(s.id) === a.id);
+            if (!group.length) return null;
+            let absent = 0, done = 0;
+            meetings.forEach(m => group.forEach(s => { if (!m.attendees.has(s.id)) { absent++; if (wasContactedForMeeting(m.date, s.id)) done++; } }));
+            const notesN = group.reduce((n, s) => n + allNotesOf(s.id).filter((x: any) => x.byId === a.id && String(x.date || x.at || '').startsWith(prefix)).length, 0);
+            return { a, size: group.length, absent, done, pct: absent ? Math.round((done / absent) * 100) : 100, notesN };
+        }).filter(Boolean).sort((x: any, y: any) => y.pct - x.pct);
+        const trackingStart = Object.keys(followupHistory || {}).sort()[0] || latestMeetingDate || '';
+        return { prefix, scoped, meetings, perMeeting, grades, totalAvg, massKids, confessions, newKids, committed, servants, atRisk: atRiskStudents.filter(inScope), never: neverCameStudents.filter(inScope), trackingStart };
+    };
+    // وإحنا بنطبع التقرير، باقي الموقع بيستخبى
+    useEffect(() => {
+        document.body.classList.toggle('month-report-open', monthReportOpen);
+        return () => document.body.classList.remove('month-report-open');
+    }, [monthReportOpen]);
+
     const unassignedAbsentCount = students.filter(s => !assignedServantId(s.id) && isAbsentNow(s.id)).length;
     const unassignedCount = students.filter(s => !assignedServantId(s.id)).length;
 
     const recordFollowupContact = (studentId, method) => {
         if (!loggedInAdmin) return;
+        const entry = { date: getCairoDateKey(), by: loggedInAdmin.name, byId: loggedInAdmin.id, method, at: new Date().toISOString() };
         setDoc(FOLLOWUP_DOC_REF(), {
-            contacts: { [studentId]: { date: getCairoDateKey(), by: loggedInAdmin.name, byId: loggedInAdmin.id, method, at: new Date().toISOString() } },
+            contacts: { [studentId]: entry },
         }, { merge: true }).catch(err => { console.error(err); showToast('⚠️ فشل الحفظ، جرّب تاني.'); });
+        // نسخة في سجل الاجتماع ده (مابتتمسحش لما ييجي اجتماع جديد)
+        if (latestMeetingDate) {
+            setDoc(FOLLOWUP_HISTORY_REF(), { byMeeting: { [latestMeetingDate]: { [studentId]: { byId: entry.byId, method, at: entry.at } } } }, { merge: true })
+                .catch(err => console.error('Follow-up history save error:', err));
+        }
+    };
+    // اتافتقد بعد اجتماع معيّن؟ (آخر اجتماع من العلامات الحالية، والقديم من السجل)
+    const wasContactedForMeeting = (meetingDate, studentId) => {
+        if (meetingDate === latestMeetingDate) return isFollowupContacted(studentId);
+        return Boolean(followupHistory?.[meetingDate]?.[studentId]);
     };
     const toggleFollowupContacted = (studentId) => {
         if (!loggedInAdmin) return;
         if (isFollowupContacted(studentId)) {
+            if (latestMeetingDate) {
+                setDoc(FOLLOWUP_HISTORY_REF(), { byMeeting: { [latestMeetingDate]: { [studentId]: deleteField() } } }, { merge: true })
+                    .catch(err => console.error('Follow-up history delete error:', err));
+            }
             setDoc(FOLLOWUP_DOC_REF(), { contacts: { [studentId]: deleteField() } }, { merge: true })
                 .then(() => showToast('اتشالت علامة الافتقاد.'))
                 .catch(err => { console.error(err); showToast('⚠️ فشل الحفظ، جرّب تاني.'); });
@@ -4742,7 +4524,7 @@ const App = () => {
 
                     {(activeView === 'followup' || activeView === 'oversight' || isFollowupOnlyUser) && loggedInAdmin && (() => {
                         const mode = (activeView === 'oversight' && canOversee && !isFollowupOnlyUser) ? 'oversight' : 'mine';
-                        const tab = mode === 'mine' ? 'mine' : (['report', 'notes', 'groups'].includes(followupTab) ? followupTab : 'report');
+                        const tab = mode === 'mine' ? 'mine' : (['report', 'notes', 'groups', 'friday'].includes(followupTab) ? followupTab : 'report');
                         const reportGrade = myScope === 'all' ? oversightGrade : myScope;
                         const inReportGrade = (s) => reportGrade === 'all' || String(s.grade || '').trim() === reportGrade;
                         const noteLine = (n) => n ? `${n.by} • ${fmtShortAt(n.at)}` : '';
@@ -4769,7 +4551,7 @@ const App = () => {
                         };
                         const tabBtn = (id, label) => (
                             <button type="button" onClick={() => setFollowupTab(id)}
-                                className={`flex-1 py-2 rounded-lg text-sm font-black transition-colors ${tab === id ? 'bg-amber-500 text-indigo-950' : 'text-indigo-200 hover:bg-indigo-800/60'}`}>{label}</button>
+                                className={`flex-1 py-2 rounded-lg text-xs font-black transition-colors ${tab === id ? 'bg-amber-500 text-indigo-950' : 'text-indigo-200 hover:bg-indigo-800/60'}`}>{label}</button>
                         );
                         const bar = (done, total) => {
                             const pct = total ? Math.round((done / total) * 100) : 100;
@@ -4794,8 +4576,8 @@ const App = () => {
                                                 {s.grade ? `${s.grade} • ` : ''}{info.lastAttendedDate ? `آخر حضور ${fmt(info.lastAttendedDate)}` : 'ماحضرش السنة دي'}
                                             </div>
                                         </div>
-                                        <span className="shrink-0 bg-red-500/15 text-red-300 border border-red-400/30 text-[11px] font-black px-2 py-0.5 rounded-full whitespace-nowrap">
-                                            {info.streak === 1 ? 'غاب آخر اجتماع' : `غايب ${info.streak} اجتماعات`}
+                                        <span className={`shrink-0 text-[11px] font-black px-2 py-0.5 rounded-full whitespace-nowrap border ${isAtRisk(s.id) ? 'bg-red-600 text-white border-red-400' : 'bg-red-500/15 text-red-300 border-red-400/30'}`}>
+                                            {isAtRisk(s.id) ? '⚠️ ' : ''}{info.streak === 1 ? 'غاب آخر اجتماع' : `غايب ${info.streak} اجتماعات`}
                                         </span>
                                     </div>
                                     <div className="grid grid-cols-3 gap-2">
@@ -4840,11 +4622,18 @@ const App = () => {
                                         {latestMeetingDate && <span className="text-[11px] text-indigo-300">آخر اجتماع: {fmt(latestMeetingDate, { weekday: 'long', day: 'numeric', month: 'long' })}</span>}
                                     </div>
                                     {mode === 'oversight' && (
-                                        <div className="flex gap-1 p-1 bg-indigo-950/60 rounded-xl">
-                                            {tabBtn('report', 'تقرير الخدام')}
+                                        <div className="grid grid-cols-4 gap-1 p-1 bg-indigo-950/60 rounded-xl">
+                                            {tabBtn('report', 'التقرير')}
+                                            {tabBtn('friday', 'الجمعة')}
                                             {tabBtn('notes', 'الملاحظات')}
                                             {tabBtn('groups', 'المجموعات')}
                                         </div>
+                                    )}
+                                    {mode === 'oversight' && (
+                                        <button type="button" onClick={() => { setMonthReportPrefix(prev => prev || reportMonths[0] || getCairoMonthPrefix()); setMonthReportOpen(true); }}
+                                            className="w-full rounded-xl border border-white/15 bg-white/10 py-2 text-sm font-black text-white">
+                                            📄 التقرير الشهري (PDF)
+                                        </button>
                                     )}
                                     {mode === 'oversight' && tab !== 'groups' && myScope === 'all' && (
                                         <div className="flex gap-1.5 flex-wrap">
@@ -4913,8 +4702,47 @@ const App = () => {
                                     const unAbsent = students.filter(s => inReportGrade(s) && !assignedServantId(s.id) && isAbsentNow(s.id)).length;
                                     const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString();
                                     const notesCountBy = (adminId) => students.filter(inReportGrade).reduce((n, s) => n + allNotesOf(s.id).filter((x: any) => x.byId === adminId && String(x.at || '') >= monthAgo).length, 0);
+                                    const riskList = atRiskStudents.filter(inReportGrade);
+                                    const neverList = neverCameStudents.filter(inReportGrade);
                                     return (
                                     <div className="space-y-3">
+                                        {(riskList.length > 0 || neverList.length > 0) && (
+                                            <div className="rounded-2xl border border-red-400/40 bg-red-500/10 overflow-hidden">
+                                                <button type="button" onClick={() => setAtRiskOpen(v => !v)} className="w-full flex items-center justify-between gap-2 p-3.5 text-right">
+                                                    <span className="font-black text-red-200">⚠️ ولاد بيبعدوا ({riskList.length})</span>
+                                                    <span className="text-[11px] text-red-200/70">غايبين {AT_RISK_STREAK} اجتماعات أو أكتر {atRiskOpen ? '▲' : '▼'}</span>
+                                                </button>
+                                                {atRiskOpen && (
+                                                    <div className="border-t border-red-400/30 divide-y divide-red-400/15">
+                                                        {riskList.length === 0 && <p className="p-3 text-xs text-red-100/70">مفيش حد بيبعد دلوقتي 🎉</p>}
+                                                        {riskList.map(s => {
+                                                            const info = followupInfo[s.id];
+                                                            const servant = admins.find(a => a.id === assignedServantId(s.id));
+                                                            const last = allNotesOf(s.id)[0];
+                                                            return (
+                                                                <div key={s.id} className="px-3.5 py-2.5 space-y-1">
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <span className="text-sm font-bold text-white truncate">{s.name} <span className="text-[11px] font-normal text-white/50">({s.grade || ''})</span></span>
+                                                                        <span className="shrink-0 text-[11px] font-black text-red-200">غايب {info.streak}</span>
+                                                                    </div>
+                                                                    <div className="text-[11px] text-white/55">
+                                                                        آخر حضور {fmt(info.lastAttendedDate)} • {servant ? `خادمه: ${servant.name}` : <span className="text-red-300 font-bold">مالوش خادم</span>}
+                                                                        {isFollowupContacted(s.id) ? ' • ✅ اتافتقد الأسبوع ده' : ' • ⏳ لسه ماتافتقدش'}
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="flex-1 min-w-0 text-[11px] text-white/50 truncate">{last ? `📝 ${last.text}` : 'مفيش ملاحظات'}</div>
+                                                                        {notesBtn(s, true)}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                        {neverList.length > 0 && (
+                                                            <p className="px-3.5 py-2.5 text-[11px] text-white/50">وفيه كمان {neverList.length} ولد ماحضروش ولا مرة السنة دي (موجودين في التقرير الشهري).</p>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                         {unCount > 0 && (
                                             <button type="button" onClick={() => setFollowupTab('groups')}
                                                 className="w-full text-right bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-xs text-red-200 font-bold">
@@ -4991,6 +4819,79 @@ const App = () => {
                                                 </button>
                                             ))}
                                             {feed.length === 80 && <p className="text-center text-[11px] text-white/40">بيظهر آخر 80 ملاحظة بس. دوس على أي ولد تشوف كل ملاحظاته.</p>}
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* ===== ملخص الجمعة ===== */}
+                                {tab === 'friday' && mode === 'oversight' && (() => {
+                                    if (followupMeetings.length === 0) return <p className="text-center text-indigo-300 mt-6">لسه مفيش اجتماعات متسجلة.</p>;
+                                    const date = followupMeetings.some(m => m.date === fridayMeetingDate) ? fridayMeetingDate : followupMeetings[0].date;
+                                    const sum = buildFridaySummary(date, inReportGrade);
+                                    if (!sum) return null;
+                                    const text = fridaySummaryText(sum, reportGrade === 'all' ? '' : reportGrade);
+                                    const diff = sum.prevCount === null ? null : sum.present.length - sum.prevCount;
+                                    const stat = (label, value, tone = 'text-white') => (
+                                        <div className="rounded-xl bg-white/5 border border-white/10 py-2 text-center">
+                                            <div className={`text-xl font-black ${tone}`}>{value}</div>
+                                            <div className="text-[10px] text-white/55 font-bold">{label}</div>
+                                        </div>
+                                    );
+                                    const nameList = (title, list, tone) => list.length > 0 && (
+                                        <div className="rounded-xl bg-white/5 border border-white/10 p-3">
+                                            <div className={`text-xs font-black mb-1 ${tone}`}>{title} ({list.length})</div>
+                                            <div className="text-sm text-white/85 leading-relaxed">{list.map(s => s.name).join('، ')}</div>
+                                        </div>
+                                    );
+                                    return (
+                                        <div className="space-y-3">
+                                            <div className="flex gap-1.5 overflow-x-auto pb-1">
+                                                {followupMeetings.slice(0, 8).map(m => (
+                                                    <button key={m.date} type="button" onClick={() => setFridayMeetingDate(m.date)}
+                                                        className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-black border ${m.date === date ? 'bg-amber-500 text-indigo-950 border-amber-400' : 'bg-white/5 text-white/70 border-white/15'}`}>
+                                                        {fmt(m.date, { day: 'numeric', month: 'short' })}{isFirstFridayDateKey(m.date) ? ' ⛪' : ''}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {stat('حضروا', sum.present.length, 'text-amber-300')}
+                                                {stat('عن اللي قبله', diff === null ? '—' : diff > 0 ? `+${diff}` : String(diff), diff === null ? 'text-white' : diff >= 0 ? 'text-emerald-300' : 'text-red-300')}
+                                                {stat('أول مرة', sum.newKids.length, 'text-sky-300')}
+                                            </div>
+                                            {sum.byGrade.length > 1 && (
+                                                <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${sum.byGrade.length}, minmax(0, 1fr))` }}>
+                                                    {sum.byGrade.map(x => stat(x.g, `${x.n}/${x.total}`))}
+                                                </div>
+                                            )}
+                                            {nameList('🆕 أول مرة ييجوا', sum.newKids, 'text-sky-300')}
+                                            {nameList('🔙 رجعوا بعد غياب', sum.returned, 'text-emerald-300')}
+                                            {sum.top.length > 0 && (
+                                                <div className="rounded-xl bg-white/5 border border-white/10 p-3">
+                                                    <div className="text-xs font-black mb-1 text-amber-300">🏆 أعلى نقط</div>
+                                                    <div className="text-sm text-white/85">{sum.top.map(x => `${x.s.name} (${x.p})`).join('، ')}</div>
+                                                </div>
+                                            )}
+                                            {sum.prev && sum.fuTotal > 0 && (
+                                                <div className="rounded-xl bg-white/5 border border-white/10 p-3 space-y-1.5">
+                                                    <div className="text-xs font-black text-white/80">📞 افتقاد غياب الاجتماع اللي قبله: {sum.fuDone} من {sum.fuTotal}</div>
+                                                    {bar(sum.fuDone, sum.fuTotal)}
+                                                </div>
+                                            )}
+                                            <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                                                <div className="text-[11px] font-black text-white/50 mb-1.5">الرسالة اللي هتتبعت:</div>
+                                                <pre className="whitespace-pre-wrap text-xs text-white/80 font-sans leading-relaxed">{text}</pre>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <a href={`https://wa.me/?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer"
+                                                    className="flex items-center justify-center gap-1.5 bg-green-600 text-white text-sm font-black py-2.5 rounded-xl">
+                                                    <WhatsAppIcon className="w-4 h-4" /> ابعت واتساب
+                                                </a>
+                                                <button type="button" onClick={() => {
+                                                    const done = () => showToast('✅ اتنسخ الملخص.');
+                                                    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => window.prompt('انسخ الملخص:', text));
+                                                    else window.prompt('انسخ الملخص:', text);
+                                                }} className="bg-white/10 border border-white/15 text-white text-sm font-black py-2.5 rounded-xl">📋 نسخ</button>
+                                            </div>
                                         </div>
                                     );
                                 })()}
@@ -5256,7 +5157,7 @@ const App = () => {
                             { key: 'home', label: 'الرئيسية', onClick: () => goSection(HOME_VIEWS.includes(activeView) ? activeView : 'students'), icon: <UserGroupIcon className="w-6 h-6" /> },
                             { key: 'scan', label: 'مسح', onClick: () => setScannerOpen(true), icon: <CameraIcon className="w-6 h-6" /> },
                             { key: 'followup', label: 'الافتقاد', onClick: () => goSection('followup'), icon: <span className="text-xl leading-6">📞</span>, badge: myPendingFollowupCount },
-                            ...(canOversee ? [{ key: 'oversight', label: 'المتابعة', onClick: () => goSection('oversight'), icon: <span className="text-xl leading-6">📊</span>, badge: 0 }] : []),
+                            ...(canOversee ? [{ key: 'oversight', label: 'المتابعة', onClick: () => goSection('oversight'), icon: <span className="text-xl leading-6">📊</span>, badge: atRiskStudents.filter(scopeCoversStudent).length }] : []),
                             { key: 'admin', label: 'الإدارة', onClick: () => goSection('admin'), icon: <span className="text-xl leading-6">⚙️</span>, badge: adminAlertsCount },
                         ].map(item => {
                             const active = item.key === currentSection;
@@ -5274,6 +5175,123 @@ const App = () => {
                     </div>
                 </nav>
             )}
+
+            {monthReportOpen && canOversee && createPortal((() => {
+                const prefix = monthReportPrefix || reportMonths[0] || getCairoMonthPrefix();
+                const scopeFn = (s) => myScope === 'all' || String(s.grade || '').trim() === myScope;
+                const r = buildMonthReport(prefix, scopeFn);
+                const monthName = getArabicMonthNameFromPrefix(prefix);
+                const dShort = (d) => formatCairoDateKeyAr(d, { day: 'numeric', month: 'long' });
+                const th = { padding: '6px 8px', background: '#eef2ff', color: '#312e81', fontWeight: 800, fontSize: 12, borderBottom: '1px solid #c7d2fe', textAlign: 'right' as const };
+                const td = { padding: '6px 8px', fontSize: 12, borderBottom: '1px solid #e5e7eb', textAlign: 'right' as const };
+                const h2 = { fontSize: 15, fontWeight: 900, color: '#1e1b4b', margin: '18px 0 8px' };
+                const kpi = (label, value) => (
+                    <div style={{ flex: '1 1 0', minWidth: 90, border: '1px solid #e0e7ff', borderRadius: 12, padding: '8px 6px', textAlign: 'center', background: '#f8faff' }}>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: '#4338ca' }}>{value}</div>
+                        <div style={{ fontSize: 11, color: '#475569', fontWeight: 700 }}>{label}</div>
+                    </div>
+                );
+                return (
+                    <div id="month-report" dir="rtl" style={{ position: 'fixed', inset: 0, zIndex: 70, overflowY: 'auto', background: '#fff', color: '#0f172a', fontFamily: "'Cairo', sans-serif" }}>
+                        <style>{`
+                            @media print {
+                                body.month-report-open #root { display: none !important; }
+                                body.month-report-open::before { display: none !important; }
+                                body.month-report-open { background: #fff !important; }
+                                #month-report { position: static !important; overflow: visible !important; }
+                                #month-report .no-print { display: none !important; }
+                                #month-report table, #month-report .keep { break-inside: avoid; }
+                                @page { size: A4; margin: 12mm; }
+                            }
+                            #month-report * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                        `}</style>
+                        <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 2, display: 'flex', gap: 8, alignItems: 'center', padding: 'max(10px, env(safe-area-inset-top, 0px)) 12px 10px', background: '#1e1b4b', color: '#fff', flexWrap: 'wrap' }}>
+                            <select value={prefix} onChange={(e) => setMonthReportPrefix(e.target.value)}
+                                style={{ background: '#312e81', color: '#fff', border: '1px solid #6366f1', borderRadius: 10, padding: '6px 8px', fontWeight: 800 }}>
+                                {(reportMonths.length ? reportMonths : [prefix]).map(p => <option key={p} value={p}>{getArabicMonthNameFromPrefix(p)}</option>)}
+                            </select>
+                            <button type="button" onClick={() => window.print()} style={{ flex: 1, background: '#f59e0b', color: '#1e1b4b', fontWeight: 900, borderRadius: 10, padding: '8px 10px' }}>🖨️ اطبع / احفظ PDF</button>
+                            <button type="button" onClick={() => setMonthReportOpen(false)} style={{ background: 'rgba(255,255,255,0.15)', fontWeight: 900, borderRadius: 10, padding: '8px 12px' }}>إغلاق</button>
+                        </div>
+                        <div style={{ maxWidth: 780, margin: '0 auto', padding: '18px 16px 40px' }}>
+                            <div style={{ borderBottom: '3px solid #4338ca', paddingBottom: 10 }}>
+                                <div style={{ fontSize: 22, fontWeight: 900, color: '#1e1b4b' }}>تقرير شهر {monthName}</div>
+                                <div style={{ fontSize: 13, color: '#475569', fontWeight: 700 }}>اجتماع الأنبا رويس — ثانوي بنين — كنيسة مارمينا{myScope !== 'all' ? ` — ${myScope}` : ''}</div>
+                                <div style={{ fontSize: 11, color: '#94a3b8' }}>اتعمل بواسطة {loggedInAdmin?.name} يوم {formatCairoDateKeyAr(getCairoDateKey(), { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                            </div>
+
+                            {r.meetings.length === 0 ? (
+                                <p style={{ marginTop: 24, textAlign: 'center', color: '#64748b' }}>مفيش اجتماعات متسجلة في الشهر ده.</p>
+                            ) : (<>
+                                <div className="keep" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+                                    {kpi('اجتماعات', r.meetings.length)}
+                                    {kpi('متوسط الحضور', `${Math.round(r.totalAvg)} من ${r.scoped.length}`)}
+                                    {kpi('حضروا القداس', r.massKids.length)}
+                                    {kpi('اعترفوا', r.confessions)}
+                                    {kpi('أول مرة ييجوا', r.newKids.length)}
+                                </div>
+
+                                <div style={h2}>📅 الحضور في كل اجتماع</div>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead><tr><th style={th}>التاريخ</th>{followupGrades.map(g => <th key={g} style={th}>{g}</th>)}<th style={th}>الإجمالي</th></tr></thead>
+                                    <tbody>{r.perMeeting.map(m => (
+                                        <tr key={m.date}><td style={td}>{dShort(m.date)}{m.isMass ? ' (قداس)' : ''}</td>{m.byGrade.map((n, i) => <td key={i} style={td}>{n}</td>)}<td style={{ ...td, fontWeight: 900 }}>{m.total}</td></tr>
+                                    ))}</tbody>
+                                </table>
+
+                                <div style={h2}>🎓 نسبة الحضور لكل صف</div>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead><tr><th style={th}>الصف</th><th style={th}>عدد الأولاد</th><th style={th}>متوسط الحضور</th><th style={th}>النسبة</th></tr></thead>
+                                    <tbody>{r.grades.map(x => (
+                                        <tr key={x.g}><td style={td}>{x.g}</td><td style={td}>{x.total}</td><td style={td}>{x.avg.toFixed(1)}</td>
+                                            <td style={td}><div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ flex: 1, height: 8, background: '#e5e7eb', borderRadius: 99 }}><div style={{ width: `${x.pct}%`, height: 8, background: x.pct >= 50 ? '#10b981' : x.pct >= 25 ? '#f59e0b' : '#ef4444', borderRadius: 99 }} /></div><b>{x.pct}%</b></div></td></tr>
+                                    ))}</tbody>
+                                </table>
+
+                                <div style={h2}>📞 الافتقاد (لكل خادم)</div>
+                                {r.servants.length === 0 ? <p style={{ fontSize: 12, color: '#64748b' }}>لسه مفيش مجموعات متوزعة.</p> : (
+                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                        <thead><tr><th style={th}>الخادم</th><th style={th}>مجموعته</th><th style={th}>حالات غياب</th><th style={th}>افتقد</th><th style={th}>النسبة</th><th style={th}>ملاحظات</th></tr></thead>
+                                        <tbody>{r.servants.map((x: any) => (
+                                            <tr key={x.a.id}><td style={{ ...td, fontWeight: 800 }}>{x.a.name}</td><td style={td}>{x.size}</td><td style={td}>{x.absent}</td><td style={td}>{x.done}</td>
+                                                <td style={{ ...td, fontWeight: 900, color: x.pct >= 70 ? '#059669' : x.pct >= 30 ? '#d97706' : '#dc2626' }}>{x.absent ? `${x.pct}%` : '—'}</td><td style={td}>{x.notesN}</td></tr>
+                                        ))}</tbody>
+                                    </table>
+                                )}
+                                {r.trackingStart && <p style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>* تسجيل الافتقاد لكل اجتماع بدأ من {dShort(r.trackingStart)}، فالاجتماعات اللي قبل كده ممكن تبان أقل من الحقيقة. والمجموعات محسوبة على التوزيع الحالي.</p>}
+
+                                <div style={h2}>⭐ أكتر الأولاد التزامًا</div>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead><tr><th style={th}>#</th><th style={th}>الاسم</th><th style={th}>الصف</th><th style={th}>حضر</th><th style={th}>نقط الشهر</th></tr></thead>
+                                    <tbody>{r.committed.map((x, i) => (
+                                        <tr key={x.s.id}><td style={td}>{i + 1}</td><td style={{ ...td, fontWeight: 800 }}>{x.s.name}</td><td style={td}>{x.s.grade || ''}</td><td style={td}>{x.n} من {r.meetings.length}</td><td style={td}>{x.p}</td></tr>
+                                    ))}</tbody>
+                                </table>
+
+                                {r.newKids.length > 0 && (<>
+                                    <div style={h2}>🆕 أول مرة ييجوا الشهر ده ({r.newKids.length})</div>
+                                    <p style={{ fontSize: 12, lineHeight: 1.9 }}>{r.newKids.map(s => s.name).join('، ')}</p>
+                                </>)}
+
+                                <div style={h2}>⚠️ ولاد بيبعدوا ({r.atRisk.length})</div>
+                                {r.atRisk.length === 0 ? <p style={{ fontSize: 12, color: '#059669' }}>مفيش حد غايب {AT_RISK_STREAK} اجتماعات ورا بعض 🎉</p> : (
+                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                        <thead><tr><th style={th}>الاسم</th><th style={th}>الصف</th><th style={th}>غايب</th><th style={th}>آخر حضور</th><th style={th}>خادمه</th></tr></thead>
+                                        <tbody>{r.atRisk.map(s => (
+                                            <tr key={s.id}><td style={{ ...td, fontWeight: 800 }}>{s.name}</td><td style={td}>{s.grade || ''}</td><td style={td}>{followupInfo[s.id]?.streak} اجتماعات</td>
+                                                <td style={td}>{dShort(followupInfo[s.id]?.lastAttendedDate)}</td><td style={td}>{admins.find(a => a.id === assignedServantId(s.id))?.name || '—'}</td></tr>
+                                        ))}</tbody>
+                                    </table>
+                                )}
+                                {r.never.length > 0 && (<>
+                                    <div style={h2}>🚫 ماحضروش ولا مرة السنة دي ({r.never.length})</div>
+                                    <p style={{ fontSize: 12, lineHeight: 1.9 }}>{r.never.map(s => s.name).join('، ')}</p>
+                                </>)}
+                            </>)}
+                        </div>
+                    </div>
+                );
+            })(), document.body)}
 
             <Modal isOpen={!!notesStudentId && !!loggedInAdmin} onClose={() => { setNotesStudentId(''); setNoteDraft(''); }}
                 title={`📝 ملاحظات: ${students.find(s => s.id === notesStudentId)?.name || ''}`}>
